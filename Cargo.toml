@@ -1,0 +1,33 @@
+[package]
+name = "uefi_bootloader"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+uefi = "0.14.0"
+uefi-services = "0.11.0"
+log = {version = "0.4.11", default-features = false }
+conquer-once = { version = "*", default-features = false }
+spinning_top = "*"
+bitflags = "*"
+lazy_static = {version= "*", features = ["spin_no_std"]}
+x86_64 = { version = "*", optional = false, default-features = false, features = ["instructions", "inline_asm", "abi_x86_interrupt"] }
+panic-halt = "0.2.0"
+xmas-elf = { version = "*" }
+
+[dependencies.font8x8]
+version = "0.2.5"
+default-features = false
+features = ["unicode"]
+optional = false
+
+[workspace]
+members = [
+    "kernel"
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
