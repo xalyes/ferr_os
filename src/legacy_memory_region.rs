@@ -1,10 +1,11 @@
 use crate::boot_info::{MemoryRegion, MemoryRegionKind};
 use core::mem::MaybeUninit;
 use x86_64::{
-    structures::paging::{FrameAllocator, PhysFrame, Size4KiB},
-    PhysAddr,
+    structures::paging::{FrameAllocator, Size4KiB, PhysFrame},
 };
 use uefi::table::boot::{MemoryDescriptor, MemoryType};
+
+use crate::addr::{PhysAddr};
 
 /// Abstraction trait for a memory region returned by the UEFI or BIOS firmware.
 pub trait LegacyMemoryRegion: Copy + core::fmt::Debug {
@@ -36,7 +37,7 @@ where
     /// library assumes that references can never point to virtual address `0`.  
     pub fn new(memory_map: I) -> Self {
         // skip frame 0 because the rust core library does not see 0 as a valid address
-        let start_frame = PhysFrame::containing_address(PhysAddr::new(0x1000));
+        let start_frame = PhysFrame::containing_address(x86_64::addr::PhysAddr::new(PhysAddr(0x1000).0));
         Self::new_starting_at(start_frame, memory_map)
     }
 
@@ -53,9 +54,9 @@ where
 
     fn allocate_frame_from_descriptor(&mut self, descriptor: D) -> Option<PhysFrame> {
         let start_addr = descriptor.start();
-        let start_frame = PhysFrame::containing_address(start_addr);
+        let start_frame = PhysFrame::containing_address(x86_64::addr::PhysAddr::new(start_addr.0));
         let end_addr = start_addr + descriptor.len();
-        let end_frame = PhysFrame::containing_address(end_addr - 1u64);
+        let end_frame = PhysFrame::containing_address(x86_64::addr::PhysAddr::new(end_addr.0 - 1u64));
 
         // increase self.next_frame to start_frame if smaller
         if self.next_frame < start_frame {
@@ -108,14 +109,14 @@ where
             let next_free = self.next_frame.start_address();
             let kind = match descriptor.kind() {
                 MemoryRegionKind::Usable => {
-                    if end <= next_free {
+                    if x86_64::addr::PhysAddr::new(end.0) <= next_free {
                         MemoryRegionKind::Bootloader
-                    } else if descriptor.start() >= next_free {
+                    } else if x86_64::addr::PhysAddr::new(descriptor.start().0) >= next_free {
                         MemoryRegionKind::Usable
                     } else {
                         // part of the region is used -> add it separately
                         let used_region = MemoryRegion {
-                            start: descriptor.start().as_u64(),
+                            start: descriptor.start().0,
                             end: next_free.as_u64(),
                             kind: MemoryRegionKind::Bootloader,
                         };
@@ -123,7 +124,7 @@ where
                             .expect("Failed to add memory region");
 
                         // add unused part normally
-                        start = next_free;
+                        start = PhysAddr(next_free.as_u64());
                         MemoryRegionKind::Usable
                     }
                 }
@@ -145,8 +146,8 @@ where
             };
 
             let region = MemoryRegion {
-                start: start.as_u64(),
-                end: end.as_u64(),
+                start: start.0,
+                end: end.0,
                 kind,
             };
             Self::add_region(region, regions, &mut next_index).unwrap();
@@ -178,7 +179,7 @@ where
     I: ExactSizeIterator<Item = D> + Clone,
     I::Item: LegacyMemoryRegion,
 {
-    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+    fn allocate_frame(&mut self) -> Option<x86_64::structures::paging::PhysFrame<Size4KiB>> {
         if let Some(current_descriptor) = self.current_descriptor {
             match self.allocate_frame_from_descriptor(current_descriptor) {
                 Some(frame) => return Some(frame),
@@ -207,7 +208,7 @@ pub const PAGE_SIZE: u64 = 4096;
 
 impl<'a> LegacyMemoryRegion for MemoryDescriptor {
     fn start(&self) -> PhysAddr {
-        PhysAddr::new(self.phys_start)
+        PhysAddr(self.phys_start)
     }
 
     fn len(&self) -> u64 {

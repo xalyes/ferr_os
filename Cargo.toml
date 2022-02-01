@@ -14,6 +14,7 @@ lazy_static = {version= "*", features = ["spin_no_std"]}
 x86_64 = { version = "*", optional = false, default-features = false, features = ["instructions", "inline_asm", "abi_x86_interrupt"] }
 panic-halt = "0.2.0"
 xmas-elf = { version = "*" }
+bit_field = { version = "*", optional = false }
 
 [dependencies.font8x8]
 version = "0.2.5"

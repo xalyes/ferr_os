@@ -6,6 +6,7 @@
 #![feature(maybe_uninit_slice)]
 
 mod logger;
+mod addr;
 mod legacy_memory_region;
 mod load_kernel;
 mod level_4_entries;
@@ -577,7 +578,7 @@ pub fn set_up_mappings<I, D>(
 
         let start_frame = PhysFrame::containing_address(PhysAddr::new(0));
         let max_phys = frame_allocator.max_phys_addr();
-        let end_frame: PhysFrame<Size2MiB> = PhysFrame::containing_address(max_phys - 1u64);
+        let end_frame: PhysFrame<Size2MiB> = PhysFrame::containing_address(PhysAddr::new((max_phys - 1u64).0));
         for frame in PhysFrame::range_inclusive(start_frame, end_frame) {
             let page = Page::containing_address(offset + frame.start_address().as_u64());
             let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
