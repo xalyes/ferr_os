@@ -8,8 +8,3 @@ uefi_bootloader = { path = ".." }
 panic-halt = "0.2.0"
 log = {version = "*", default-features = false }
 
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"

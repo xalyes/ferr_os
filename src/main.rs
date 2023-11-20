@@ -1,6 +1,5 @@
 #![no_main]
 #![no_std]
-#![feature(abi_efiapi)]
 #![feature(alloc_error_handler)]
 #![feature(abi_x86_interrupt)]
 #![feature(maybe_uninit_slice)]
