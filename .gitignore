@@ -1,0 +1,4 @@
+Cargo.lock
+build/EFI/*
+build/kernel
+target
