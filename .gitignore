@@ -1,4 +1,5 @@
+/target
+/build
 Cargo.lock
-build/EFI/*
-build/kernel
-target
+/.idea
+

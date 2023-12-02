@@ -1,34 +1,27 @@
 [package]
-name = "uefi_bootloader"
-version = "0.0.1"
+name = "rust_os"
+version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-uefi = "0.14.0"
-uefi-services = "0.11.0"
-log = {version = "0.4.11", default-features = false }
-conquer-once = { version = "*", default-features = false }
-spinning_top = "*"
-bitflags = "*"
-lazy_static = {version= "*", features = ["spin_no_std"]}
-x86_64 = { version = "*", optional = false, default-features = false, features = ["instructions", "inline_asm", "abi_x86_interrupt"] }
-panic-halt = "0.2.0"
-xmas-elf = { version = "*" }
-bit_field = { version = "*", optional = false }
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies.font8x8]
-version = "0.2.5"
-default-features = false
-features = ["unicode"]
-optional = false
+[dependencies.lazy_static]
+version = "1.4.0"
+features = ["spin_no_std"]
 
 [workspace]
-members = [
-    "kernel"
+members = ["disk_image", "loader"]
+
+[package.metadata.bootimage]
+test-args = [
+    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-serial", "stdio", "-display", "none"
 ]
+test-timeout = 300          # (in seconds)
+test-success-exit-code = 33 # (0x10 << 1) | 1
 
-[profile.dev]
-panic = "abort"
+[dependencies.bitflags]
+version = "2.4.1"
 
-[profile.release]
-panic = "abort"
+[dependencies]
+bootloader = "0.9.8"
+spin = "0.9.8"

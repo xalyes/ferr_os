@@ -3,4 +3,7 @@ build-std-features = ["compiler-builtins-mem"]
 build-std = ["core", "compiler_builtins", "alloc"]
 
 [build]
-target = "x86_64-unknown-uefi"
+target = "x86_64-default_settings.json"
+
+[target.'cfg(target_os = "none")']
+runner = "bootimage runner"
