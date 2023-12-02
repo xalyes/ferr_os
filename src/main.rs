@@ -4,6 +4,8 @@
 #![test_runner(rust_os::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+use rust_os::{ FrameBufferInfo, PixelFormat, entry_point };
+
 mod serial;
 
 #[test_case]
@@ -29,22 +31,6 @@ fn panic(_info: &PanicInfo) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     rust_os::test_panic_handler(info);
-}
-
-enum PixelFormat {
-    Rgb,
-    Bgr,
-    Bitmask,
-    BltOnly
-}
-
-struct FrameBufferInfo {
-    addr: u64,
-    size: usize,
-    width: usize,
-    height: usize,
-    pixel_format: PixelFormat,
-    stride: usize
 }
 
 fn write_pixel(fb_info: &FrameBufferInfo, fb_slice: &mut [u8], x: usize, y: usize, intensity: u8) {
@@ -83,26 +69,15 @@ fn render_char_96(c: char) -> [u8; 96] {
     }
 }
 
-#[no_mangle]
 #[cfg(test)]
-pub extern "C" fn _start() -> ! {
-    test_main();
+entry_point!(test_kernel_main);
 
+#[cfg(test)]
+fn test_kernel_main(_fb_info: &'static mut FrameBufferInfo) -> ! {
+    test_main();
     loop {}
 }
 
-#[macro_export]
-macro_rules! entry_point {
-    ($path:path) => {
-        #[export_name = "_start"]
-        pub extern "C" fn __impl_start(fb_info: &'static mut $crate::FrameBufferInfo) -> ! {
-            // validate the signature of the program entry point
-            let f: fn(&'static mut $crate::FrameBufferInfo) -> ! = $path;
-
-            f(fb_info)
-        }
-    };
-}
 
 #[cfg(not(test))]
 entry_point!(kernel_main);

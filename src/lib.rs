@@ -8,6 +8,7 @@ use core::arch::asm;
 use core::panic::PanicInfo;
 
 pub mod serial;
+mod page_table;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -62,10 +63,41 @@ pub fn test_runner(tests: &[&dyn Testable]) {
     exit_qemu(QemuExitCode::Success);
 }
 
-/// Entry point for `cargo xtest`
+pub enum PixelFormat {
+    Rgb,
+    Bgr,
+    Bitmask,
+    BltOnly
+}
+
+pub struct FrameBufferInfo {
+    pub addr: u64,
+    pub size: usize,
+    pub width: usize,
+    pub height: usize,
+    pub pixel_format: PixelFormat,
+    pub stride: usize
+}
+
+#[macro_export]
+macro_rules! entry_point {
+    ($path:path) => {
+        #[export_name = "_start"]
+        pub extern "C" fn __impl_start(fb_info: &'static mut $crate::FrameBufferInfo) -> ! {
+            // validate the signature of the program entry point
+            let f: fn(&'static mut $crate::FrameBufferInfo) -> ! = $path;
+
+            f(fb_info)
+        }
+    };
+}
+
 #[cfg(test)]
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
+entry_point!(test_kernel_main);
+
+/// Entry point for `cargo test`
+#[cfg(test)]
+fn test_kernel_main(_fb_info: &'static mut FrameBufferInfo) -> ! {
     test_main();
     loop {}
 }
