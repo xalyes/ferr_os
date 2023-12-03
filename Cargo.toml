@@ -10,7 +10,7 @@ version = "1.4.0"
 features = ["spin_no_std"]
 
 [workspace]
-members = ["disk_image", "loader"]
+members = ["disk_image", "loader", "shared_lib"]
 
 [package.metadata.bootimage]
 test-args = [

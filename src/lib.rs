@@ -8,7 +8,6 @@ use core::arch::asm;
 use core::panic::PanicInfo;
 
 pub mod serial;
-mod page_table;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]

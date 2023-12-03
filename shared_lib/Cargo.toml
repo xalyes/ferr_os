@@ -1,0 +1,23 @@
+[package]
+name = "shared_lib"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitflags = "2.4.1"
+conquer-once = { version = "0.4.0", default-features = false}
+log = { version = "0.4.20", default-features = false }
+spin = "0.9.8"
+spinning_top = "0.3.0"
+
+[dependencies.lazy_static]
+version = "1.4.0"
+features = ["spin_no_std"]
+
+[dependencies.font8x8]
+version = "0.3.1"
+default-features = false
+features = ["unicode"]
+optional = false
