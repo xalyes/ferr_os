@@ -167,7 +167,7 @@ fn get_p1_index(virt: u64) -> u16 {
     idx % ENTRY_COUNT
 }
 
-trait PageTablesAllocator {
+pub trait PageTablesAllocator {
     fn allocate(&mut self) -> Result::<&mut PageTable, &'static str>;
 
     unsafe fn get_mut_ptr(&mut self) -> *mut dyn PageTablesAllocator;

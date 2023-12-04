@@ -10,32 +10,69 @@ use core::ptr::read_volatile;
 use core::slice::from_raw_parts_mut;
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
+fn panic(info: &PanicInfo) -> ! {
+    unsafe {
+        logger::LOGGER
+            .get()
+            .map(|l| l.force_unlock())
+    };
+
+    log::info!("{}", info);
+
+    loop {
+        unsafe { asm!("cli; hlt") };
+    }
 }
 
 use uefi::prelude::entry;
 use core::fmt::Write;
 use core::ptr::write;
 use uefi::proto::console::text::Output;
-use uefi::table::boot::{OpenProtocolAttributes, OpenProtocolParams};
+use uefi::proto::media::file::File;
+use uefi::table::boot::{OpenProtocolAttributes, OpenProtocolParams, AllocateType, MemoryType};
+use uefi::table::SystemTable;
+use uefi::proto::media::{
+    file::{FileMode, FileAttribute, RegularFile},
+    fs::SimpleFileSystem
+};
+use uefi::data_types::CStr16;
+use uefi::proto::console::gop::GraphicsOutput;
 use xmas_elf::{ElfFile, header, program};
 use shared_lib::logger::LOGGER;
 use shared_lib::logger::{FrameBufferInfo, PixelFormat};
-use shared_lib::logger;
+use shared_lib::{logger, map_address, PageTable, PageTableEntry, PageTablesAllocator};
 
-static KERNEL: &[u8] = include_bytes!("/home/max/rust_os_3/build/kernel");
+struct UefiAllocator(SystemTable<uefi::table::Boot>);
+
+impl shared_lib::PageTablesAllocator for UefiAllocator {
+    fn allocate(&mut self) -> Result<&mut PageTable, &'static str> {
+        let allocated_page = self.0.boot_services()
+            .allocate_pages(uefi::table::boot::AllocateType::AnyPages, uefi::table::boot::MemoryType::LOADER_DATA, 1)
+            .unwrap();
+
+        let page_table_ptr = allocated_page as *mut PageTable;
+
+        unsafe {
+            core::ptr::write(page_table_ptr, PageTable::new());
+            Ok(&mut (*page_table_ptr))
+        }
+    }
+
+    unsafe fn get_mut_ptr(&mut self) -> *mut dyn PageTablesAllocator {
+        return self as *mut dyn PageTablesAllocator;
+    }
+}
 
 #[entry]
 fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi::table::Boot>) -> uefi::Status {
     let mut framebuffer = {
         let gop_handle = system_table
             .boot_services()
-            .get_handle_for_protocol::<uefi::proto::console::gop::GraphicsOutput>()
+            .get_handle_for_protocol::<GraphicsOutput>()
             .unwrap();
         let mut gop = unsafe {
             system_table.boot_services()
-                .open_protocol::<uefi::proto::console::gop::GraphicsOutput>(
+                .open_protocol::<GraphicsOutput>(
                     OpenProtocolParams {
                         handle: gop_handle,
                         agent: image,
@@ -69,22 +106,96 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
 
     log::info!("This is UEFI bootloader");
 
-    let (system_table, memory_map) = system_table
-        .exit_boot_services(uefi::table::boot::MemoryType::LOADER_DATA);
+    let kernel = {
+        let fs_handle = system_table
+            .boot_services()
+            .get_handle_for_protocol::<SimpleFileSystem>()
+            .unwrap();
 
-    let mut pages = 0;
+        let mut fs = system_table
+            .boot_services()
+            .open_protocol_exclusive::<SimpleFileSystem>(fs_handle)
+            .unwrap();
+
+        let mut root_fs = fs.open_volume().unwrap();
+
+        let mut buffer = [0; 1024];
+
+        log::info!("Root filesystem:");
+        log::info!("/");
+        loop {
+            match root_fs.read_entry(&mut buffer) {
+                Ok(res) => {
+                    match res {
+                        None => break,
+                        Some(file_info) => {
+                            log::info!("\t {} - {}",
+                            file_info.file_name(),
+                            file_info.file_size())
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Too small buffer");
+                }
+            }
+        }
+
+        let mut buff16: [u16; 16] = [0; 16];
+        let mut kernel_name = CStr16::from_str_with_buf("kernel", &mut buff16)
+            .expect("Failed to create CStr16");
+        let handle = root_fs.open(kernel_name, FileMode::Read, FileAttribute::READ_ONLY)
+            .expect("Failed to open kernel file");
+
+        let mut file = unsafe { RegularFile::new(handle) };
+
+        let kernel = {
+            let ptr = system_table
+                .boot_services()
+                .allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, 10)
+                .expect("Failed to allocate page for kernel");
+            unsafe { from_raw_parts_mut(ptr as *mut u8, 40960) }
+        };
+
+        file.read(kernel).expect("Failed to read kernel file");
+        kernel
+    };
+
+    log::info!("Exiting boot services...");
+    let (runtime_system_table, memory_map) = system_table.exit_boot_services(MemoryType::LOADER_DATA);
+
+    let mut pages_total = 0;
     for memory_descriptor in memory_map.entries() {
-        log::info!("Memory region. type: {}, attr: 0x{:x?}, page_count: {}, phys: 0x{:x?}, virt: 0x{:x?}",
-                 memory_descriptor.ty.0,
-                 memory_descriptor.att.bits(),
-                 memory_descriptor.page_count,
-                 memory_descriptor.phys_start,
-                 memory_descriptor.virt_start
+        log::info!("Memory region. page_count: {}, type: {}",
+            memory_descriptor.page_count,
+            memory_descriptor.ty.0,
         );
-        pages += memory_descriptor.page_count;
+        pages_total += memory_descriptor.page_count;
     }
 
-    log::info!("Pages total {}", pages);
+    log::info!("Pages total: {}", pages_total);
+
+    loop {}
+
+    let mut allocator = UefiAllocator{ 0: system_table };
+    let mut l4_page_table = shared_lib::PageTable::new();
+    let mut pages = 0;
+    for memory_descriptor in memory_map.entries() {
+        for i in 0..memory_descriptor.page_count {
+            log::info!("Mapping... pages already mapped: {}", pages);
+            unsafe {
+                map_address(
+                    &mut l4_page_table,
+                    memory_descriptor.phys_start + i * 4096,
+                    memory_descriptor.phys_start + i * 4096,
+                    &mut allocator)
+                    .unwrap()
+            }
+            pages += 1;
+        }
+    }
+
+    log::info!("Done mapping. Pages total mapped {}", pages);
 
     /*
     system_table.stdout().clear().unwrap();

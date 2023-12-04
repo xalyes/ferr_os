@@ -2,7 +2,7 @@ use std::{fs, io, path::Path};
 use std::{convert::TryFrom, fs::File, io::Seek};
 use std::path::PathBuf;
 
-fn create_fat_filesystem(fat_path: &Path, efi_file: &Path) {
+fn create_fat_filesystem(fat_path: &Path, efi_file: &Path, kernel_file: &Path) {
     // retrieve size of `.efi` file and round it up
     let efi_size = fs::metadata(&efi_file).unwrap().len();
     // size of a megabyte
@@ -32,6 +32,10 @@ fn create_fat_filesystem(fat_path: &Path, efi_file: &Path) {
     let mut bootx64 = root_dir.create_file("efi/boot/bootx64.efi").unwrap();
     bootx64.truncate().unwrap();
     io::copy(&mut fs::File::open(&efi_file).unwrap(), &mut bootx64).unwrap();
+
+    let mut kernel = root_dir.create_file("kernel").unwrap();
+    kernel.truncate().unwrap();
+    io::copy(&mut fs::File::open(&kernel_file).unwrap(), &mut kernel).unwrap();
 }
 
 fn create_gpt_disk(disk_path: &Path, fat_image: &Path) {
@@ -89,9 +93,12 @@ fn main() {
     let efi_path = PathBuf::from(args.next()
         .expect("path to `.efi` files must be given as argument"));
 
+    let kernel_path = PathBuf::from(args.next()
+        .expect("path to `kernel` file must be given as argument"));
+
     let fat_path = efi_path.with_extension("fat");
     let disk_path = fat_path.with_extension("gdt");
 
-    create_fat_filesystem(&fat_path, &efi_path);
+    create_fat_filesystem(&fat_path, &efi_path, &kernel_path);
     create_gpt_disk(&disk_path, &fat_path);
 }
