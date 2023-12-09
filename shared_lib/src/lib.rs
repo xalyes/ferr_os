@@ -1,7 +1,9 @@
 #![no_std]
 
 pub mod logger;
+pub mod allocator;
 
+use core::ops::IndexMut;
 use bitflags::bitflags;
 
 pub const PAGE_SIZE: u64 = 4096;
@@ -116,6 +118,12 @@ impl PageTable {
             entries: [EMPTY; ENTRY_COUNT as usize],
         }
     }
+
+    pub fn clear(&mut self) {
+        for entry in self.entries.iter_mut() {
+            entry.set_addr(0, PageTableFlags::from_bits(0).unwrap());
+        }
+    }
 }
 
 impl core::ops::Index<u16> for PageTable {
@@ -134,14 +142,14 @@ impl core::ops::IndexMut<u16> for PageTable {
     }
 }
 
-unsafe fn create_next_table<'a>(page_table_entry: &'a mut PageTableEntry, page_tables_allocator: *mut dyn PageTablesAllocator)
+unsafe fn create_next_table<'a>(page_table_entry: &'a mut PageTableEntry, page_tables_allocator: &'a mut impl PageTablesAllocator)
                                 -> Result::<&'a mut PageTable, &'static str> {
     if page_table_entry.flags().contains(PageTableFlags::PRESENT) {
         let next_page_table = unsafe { &mut *(page_table_entry.addr() as *mut PageTable) };
         Ok(next_page_table)
     }
     else {
-        let new_table = (&mut *page_tables_allocator).allocate()?;
+        let new_table = page_tables_allocator.allocate()?;
         page_table_entry.set_addr(new_table as *const _ as u64, PageTableFlags::PRESENT);
         Ok(new_table)
     }
@@ -169,48 +177,23 @@ fn get_p1_index(virt: u64) -> u16 {
 
 pub trait PageTablesAllocator {
     fn allocate(&mut self) -> Result::<&mut PageTable, &'static str>;
-
-    unsafe fn get_mut_ptr(&mut self) -> *mut dyn PageTablesAllocator;
-}
-
-#[repr(align(4096))]
-pub struct StaticAllocator {
-    tables: [PageTable; 100],
-    next_free_table: usize
-}
-
-impl StaticAllocator {
-    pub const fn new() -> Self {
-        StaticAllocator {
-            tables: [PageTable::new(); 100],
-            next_free_table: 0
-        }
-    }
-}
-
-impl PageTablesAllocator for StaticAllocator {
-    fn allocate(&mut self) -> Result::<&mut PageTable, &'static str> {
-        if self.next_free_table == 512 {
-            return Err("out of page tables");
-        }
-
-        let res = &mut self.tables[self.next_free_table];
-        self.next_free_table += 1;
-        Ok(res)
-    }
-
-    unsafe fn get_mut_ptr(&mut self) -> *mut dyn PageTablesAllocator {
-        return self as *mut dyn PageTablesAllocator;
-    }
 }
 
 pub unsafe fn map_address(l4_page_table: &mut PageTable, virt: u64, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
                       -> core::result::Result<(), &'static str> {
-    let mut allocator_ptr = page_tables_allocator.get_mut_ptr();
+    log::info!("Mapping {:#x} -> {:#x}", virt, phys);
 
-    let l3_table = create_next_table(&mut l4_page_table[get_p4_index(virt)],allocator_ptr)?;
-    let l2_table = create_next_table(&mut l3_table[get_p3_index(virt)], allocator_ptr)?;
-    let l1_table = create_next_table(&mut l2_table[get_p3_index(virt)],allocator_ptr)?;
+    let l3_page_table_entry = {
+        let l3_table = create_next_table(&mut l4_page_table[get_p4_index(virt)], page_tables_allocator)?;
+        l3_table.index_mut(get_p3_index(virt)) as *mut PageTableEntry
+    };
+
+    let l2_page_table_entry = {
+        let l2_table = create_next_table(&mut *l3_page_table_entry, page_tables_allocator)?;
+         l2_table.index_mut(get_p2_index(virt)) as *mut PageTableEntry
+    };
+
+    let l1_table = create_next_table(&mut *l2_page_table_entry, page_tables_allocator)?;
 
     let mut l1_entry = &mut l1_table[get_p1_index(virt)];
     return if l1_entry.flags().contains(PageTableFlags::PRESENT) {
@@ -219,4 +202,31 @@ pub unsafe fn map_address(l4_page_table: &mut PageTable, virt: u64, phys: u64, p
         l1_entry.set_addr(phys, PageTableFlags::PRESENT);
         Ok(())
     }
+}
+
+pub unsafe fn get_physical_address(l4_page_table: &PageTable, virt: u64) -> Option<u64> {
+    let l4_entry = l4_page_table[get_p4_index(virt)];
+    if !l4_entry.flags().contains(PageTableFlags::PRESENT) {
+        return None;
+    }
+
+    let l3_table = & *(l4_entry.addr() as *const PageTable);
+    let l3_entry = l3_table[get_p3_index(virt)];
+    if !l3_entry.flags().contains(PageTableFlags::PRESENT) {
+        return None;
+    }
+
+    let l2_table = & *(l3_entry.addr() as *const PageTable);
+    let l2_entry = l2_table[get_p2_index(virt)];
+    if !l2_entry.flags().contains(PageTableFlags::PRESENT) {
+        return None;
+    }
+
+    let l1_table = & *(l2_entry.addr() as *const PageTable);
+    let l1_entry = l1_table[get_p1_index(virt)];
+    if !l1_entry.flags().contains(PageTableFlags::PRESENT) {
+        return None;
+    }
+
+    Some(l1_entry.addr())
 }

@@ -6,6 +6,7 @@ use conquer_once::spin::OnceCell;
 use core::fmt::Write;
 use font8x8::UnicodeFonts;
 
+#[derive(Clone, Copy)]
 pub enum PixelFormat {
     Rgb,
     Bgr,
@@ -13,6 +14,7 @@ pub enum PixelFormat {
     BltOnly
 }
 
+#[derive(Clone, Copy)]
 pub struct FrameBufferInfo {
     pub addr: u64,
     pub size: usize,
