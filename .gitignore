@@ -2,4 +2,5 @@
 /build
 Cargo.lock
 /.idea
+/log.txt
 

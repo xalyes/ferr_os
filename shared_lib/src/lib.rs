@@ -3,6 +3,7 @@
 pub mod logger;
 pub mod allocator;
 
+use core::arch::asm;
 use core::ops::IndexMut;
 use bitflags::bitflags;
 
@@ -149,8 +150,8 @@ unsafe fn create_next_table<'a>(page_table_entry: &'a mut PageTableEntry, page_t
         Ok(next_page_table)
     }
     else {
-        let new_table = page_tables_allocator.allocate()?;
-        page_table_entry.set_addr(new_table as *const _ as u64, PageTableFlags::PRESENT);
+        let new_table = page_tables_allocator.allocate_page_table()?;
+        page_table_entry.set_addr(new_table as *const _ as u64, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
         Ok(new_table)
     }
 }
@@ -176,12 +177,14 @@ fn get_p1_index(virt: u64) -> u16 {
 }
 
 pub trait PageTablesAllocator {
-    fn allocate(&mut self) -> Result::<&mut PageTable, &'static str>;
+    fn allocate_page_table(&mut self) -> Result::<&mut PageTable, &'static str>;
+
+    fn allocate(&mut self, count: usize) -> Result::<u64, &'static str>;
 }
 
-pub unsafe fn map_address(l4_page_table: &mut PageTable, virt: u64, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
+unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: u64, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
                       -> core::result::Result<(), &'static str> {
-    log::info!("Mapping {:#x} -> {:#x}", virt, phys);
+    log::trace!("Mapping {:#x} -> {:#x}", virt, phys);
 
     let l3_page_table_entry = {
         let l3_table = create_next_table(&mut l4_page_table[get_p4_index(virt)], page_tables_allocator)?;
@@ -199,10 +202,23 @@ pub unsafe fn map_address(l4_page_table: &mut PageTable, virt: u64, phys: u64, p
     return if l1_entry.flags().contains(PageTableFlags::PRESENT) {
         core::result::Result::Err("this virtual address already mapped to frame")
     } else {
-        l1_entry.set_addr(phys, PageTableFlags::PRESENT);
+        l1_entry.set_addr(phys, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
+        asm!("invlpg [{}]", in(reg) phys, options(nostack, preserves_flags));
         Ok(())
     }
 }
+
+pub unsafe fn map_address(l4_page_table: &mut PageTable, virt: u64, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
+                          -> core::result::Result<(), &'static str> {
+    map_address_impl(l4_page_table, virt, phys, page_tables_allocator)?;
+
+    if virt % 4096 == 0 {
+        return Ok(());
+    }
+
+    map_address_impl(l4_page_table, virt + 4096, phys + 4096, page_tables_allocator)
+}
+
 
 pub unsafe fn get_physical_address(l4_page_table: &PageTable, virt: u64) -> Option<u64> {
     let l4_entry = l4_page_table[get_p4_index(virt)];

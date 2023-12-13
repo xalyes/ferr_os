@@ -104,7 +104,7 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
 
     let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(framebuffer.clone()));
     log::set_logger(logger).unwrap();
-    log::set_max_level(log::LevelFilter::Trace);
+    log::set_max_level(log::LevelFilter::Info);
 
     log::info!("This is UEFI bootloader");
 
@@ -228,75 +228,88 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
 
     let mut allocator = shared_lib::allocator::Allocator::new(loader_memory_map, memory_map.entries().len() + 1);
 
-    let l4_page_table = allocator.allocate().unwrap() as *mut PageTable;
+    let l4_page_table = allocator.allocate_page_table().unwrap() as *mut PageTable;
     unsafe {
         map_address(&mut *l4_page_table, context_switch as *const () as u64, context_switch as *const () as u64, &mut allocator)
             .expect("Failed to map context switch function");
 
         let phys = get_physical_address(& *l4_page_table, context_switch as *const () as u64)
             .expect("Failed to get context switch phys addr");
-        log::info!("Context switch function page addr: {:#x}", phys);
 
         let fb_start = framebuffer.addr;
         let fb_end = framebuffer.addr + framebuffer.size as u64 - 1;
         let pages_needed_for_fb = framebuffer.size / 4096;
         log::info!("Mapping framebuffer. addr: {:#x} - {:#x}. Pages for framebuffer: {}", fb_start, fb_end, pages_needed_for_fb);
-    }
 
-    //let page2 = allocator.allocate().unwrap();
-    //let page3 = allocator.allocate().unwrap();
+        for i in 0..pages_needed_for_fb {
+            let ptr = fb_start + i as u64 * 4096;
+            map_address(&mut *l4_page_table, ptr, ptr, &mut allocator)
+                .expect("Failed to map framebuffer");
+        }
 
+        let fb_info_ptr = &framebuffer as *const _ as u64;
+        log::info!("Mapping framebuffer info. addr: {:#x}", fb_info_ptr);
+        map_address(&mut *l4_page_table, fb_info_ptr, fb_info_ptr, &mut allocator)
+            .expect("Failed to map fb info");
 
-    loop {}
+        let stack_addr = allocator.allocate(21)
+            .expect("Failed to allocate memory for stack");
 
-    /*
-    system_table.stdout().clear().unwrap();
-    writeln!(system_table.stdout(), "This is UEFI bootloader").unwrap();
+        log::info!("Mapping stack");
+        for i in 0..21 {
+            let ptr = stack_addr + i as u64 * 4096;
+            map_address(&mut *l4_page_table, ptr, ptr, &mut allocator)
+                .expect("Failed to map stack");
+        }
 
-    //let mut allocator = shared_lib::StaticAllocator::new();
-    //let mut l4_page_table = shared_lib::PageTable::new();
+        let elf_file = ElfFile::new(kernel).unwrap();
+        header::sanity_check(&elf_file).expect("Failed to parse kernel file. Expected ELF");
 
-    let entry_point = {
-        let stdout = system_table.stdout();
-        stdout.clear().unwrap();
-        writeln!(stdout, "Kernel size: {}", KERNEL.len()).unwrap();
+        for header in elf_file.program_iter() {
+            match header.get_type().unwrap() {
+                program::Type::Load => {
+                    let phys_start_addr = (kernel.as_ptr() as u64) + header.offset();
+                    let phys_end_addr = phys_start_addr + header.file_size() - 1;
 
-        let elf_file = ElfFile::new(KERNEL).unwrap();
-        header::sanity_check(&elf_file).unwrap();
+                    let virt_start_addr = header.virtual_addr();
 
-        for segment in elf_file.program_iter() {
-            program::sanity_check(segment, &elf_file).unwrap();
+                    log::info!("Handling segment phys: {:#x}, virt: {:#x}, phys_start: {:#x}, phys_end: {:#x}",
+                    header.physical_addr(), virt_start_addr, phys_start_addr, phys_end_addr);
 
-            if let program::Type::Load = segment.get_type().unwrap() {
-                writeln!(stdout, "Loading segment...").unwrap();
+                    for i in 0..(1 + header.file_size() / 4096) {
+                        log::info!("Mapping {:#x} to {:#x}", virt_start_addr + i * 4096, phys_start_addr + i * 4096);
+                        map_address(&mut *l4_page_table, virt_start_addr + i * 4096, phys_start_addr + i * 4096, &mut allocator)
+                            .expect("Failed to map kernel");
+                    }
+                }
+                program::Type::Tls => { panic!("Not implemented TLS section") }
+                _ => {}
             }
         }
 
-        let cr0: u32;
-        unsafe {
-            asm!(
-            "mov {0:r}, cr0",
-            out(reg) cr0
-            );
-        }
-        writeln!(stdout, "CR0 value: {}", cr0).unwrap();
-        elf_file.header.pt2.entry_point()
-    };
+        let entry_point = elf_file.header.pt2.entry_point();
 
-    writeln!(system_table.stdout(), "entry point: {}", entry_point).unwrap();
+        log::info!("Page table: {:#x}", l4_page_table as u64);
+        log::info!("Context switch function page addr: {:#x}", phys);
+        log::info!("rsp: {:#x}", stack_addr + 19*4096);
+        log::info!("Jumping to kernel entry point at {:#x}", entry_point);
+        log::info!("Kernel address: {:#x}", kernel.as_ptr() as u64);
+        log::info!("FB info: {:#x}", &framebuffer as *const _ as u64);
 
-*/
-
-    loop{}
-    //unsafe { context_switch(entry_point, 0x20000, framebuffer); }
+        //map_address(&mut *l4_page_table, l4_page_table as u64, l4_page_table as u64, &mut allocator)
+        //    .expect("Failed to map l4 page table");
+        
+        context_switch(l4_page_table as u64, entry_point, stack_addr + 19*4096, &framebuffer);
+    }
 }
 
-unsafe fn context_switch(entry_point: u64, stack_top: u64, frame_buffer_info: FrameBufferInfo) -> ! {
+unsafe fn context_switch(page_table: u64, entry_point: u64, stack_top: u64, frame_buffer_info: &FrameBufferInfo) -> ! {
     asm!(
-    "mov rsp, {}; push 0; jmp {}",
+    "mov cr3, {}; mov rsp, {}; push 0; jmp {}",
+    in(reg) page_table,
     in(reg) stack_top,
     in(reg) entry_point,
-    in("rdi") &frame_buffer_info as *const _ as usize,
+    in("rdi") frame_buffer_info as *const _ as u64,
     );
 
     unreachable!();
