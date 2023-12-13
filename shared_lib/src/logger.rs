@@ -43,7 +43,7 @@ impl Logger {
         let color = match &self.fb_info.pixel_format {
             PixelFormat::Rgb => [intensity, intensity, intensity / 2, 0],
             PixelFormat::Bgr => [intensity / 2, intensity, intensity, 0],
-            other => {
+            _other => {
                 loop {}
             }
         };

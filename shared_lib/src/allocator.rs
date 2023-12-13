@@ -2,12 +2,12 @@ use crate::{PageTable, PageTablesAllocator};
 
 #[derive(Debug)]
 pub enum MemoryType {
-    FREE,
-    RESERVED,
-    IN_USE,
-    ACPI_1_3,
-    ACPI_RECLAIM,
-    ACPI_1_4,
+    Free,
+    Reserved,
+    InUse,
+    Acpi1_3,
+    AcpiReclaim,
+    Acpi1_4,
 }
 
 pub struct MemoryRegion {
@@ -35,15 +35,15 @@ impl PageTablesAllocator for Allocator<'_> {
     fn allocate_page_table(&mut self) -> Result::<&mut PageTable, &'static str> {
         for region in self.memory_map.iter_mut() {
             match &region.ty {
-                MemoryType::FREE => {
+                MemoryType::Free => {
                     let addr = if region.page_count == 1 {
-                        region.ty = MemoryType::IN_USE;
+                        region.ty = MemoryType::InUse;
                         region.addr
                     } else {
                         region.page_count -= 1;
                         let new_region_addr = region.addr + (region.page_count * 4096) as u64;
                         self.memory_map[self.size] = MemoryRegion {
-                            ty: MemoryType::IN_USE,
+                            ty: MemoryType::InUse,
                             addr: new_region_addr,
                             page_count: 1
                         };
@@ -55,7 +55,7 @@ impl PageTablesAllocator for Allocator<'_> {
                     page_table[0].clear();
                     return Ok(&mut page_table[0]);
                 }
-                other => {}
+                _other => {}
             }
         }
         Err("Out of memory!")
@@ -64,19 +64,19 @@ impl PageTablesAllocator for Allocator<'_> {
     fn allocate(&mut self, count: usize) -> Result<u64, &'static str> {
         for region in self.memory_map.iter_mut() {
             match &region.ty {
-                MemoryType::FREE => {
+                MemoryType::Free => {
                     if region.page_count < count {
                         continue;
                     }
 
                     let addr = if region.page_count == count {
-                        region.ty = MemoryType::IN_USE;
+                        region.ty = MemoryType::InUse;
                         region.addr
                     } else {
                         region.page_count -= count;
                         let new_region_addr = region.addr + (region.page_count * 4096) as u64;
                         self.memory_map[self.size] = MemoryRegion {
-                            ty: MemoryType::IN_USE,
+                            ty: MemoryType::InUse,
                             addr: new_region_addr,
                             page_count: count
                         };
@@ -86,7 +86,7 @@ impl PageTablesAllocator for Allocator<'_> {
                     log::info!("Allocated region for {} pages. Addr: {:#x}", count, addr);
                     return Ok(addr);
                 }
-                other => {}
+                _other => {}
             }
         }
         Err("Out of memory!")

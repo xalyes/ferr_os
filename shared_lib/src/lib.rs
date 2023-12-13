@@ -198,7 +198,7 @@ unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: u64, phys: u64, 
 
     let l1_table = create_next_table(&mut *l2_page_table_entry, page_tables_allocator)?;
 
-    let mut l1_entry = &mut l1_table[get_p1_index(virt)];
+    let l1_entry = &mut l1_table[get_p1_index(virt)];
     return if l1_entry.flags().contains(PageTableFlags::PRESENT) {
         core::result::Result::Err("this virtual address already mapped to frame")
     } else {
