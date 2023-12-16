@@ -62,29 +62,13 @@ pub fn test_runner(tests: &[&dyn Testable]) {
     exit_qemu(QemuExitCode::Success);
 }
 
-pub enum PixelFormat {
-    Rgb,
-    Bgr,
-    Bitmask,
-    BltOnly
-}
-
-pub struct FrameBufferInfo {
-    pub addr: u64,
-    pub size: usize,
-    pub width: usize,
-    pub height: usize,
-    pub pixel_format: PixelFormat,
-    pub stride: usize
-}
-
 #[macro_export]
 macro_rules! entry_point {
     ($path:path) => {
         #[export_name = "_start"]
-        pub extern "C" fn __impl_start(fb_info: &'static mut $crate::FrameBufferInfo) -> ! {
+        pub extern "C" fn __impl_start(fb_info: &'static mut shared_lib::logger::FrameBufferInfo) -> ! {
             // validate the signature of the program entry point
-            let f: fn(&'static mut $crate::FrameBufferInfo) -> ! = $path;
+            let f: fn(&'static mut shared_lib::logger::FrameBufferInfo) -> ! = $path;
 
             f(fb_info)
         }
@@ -96,7 +80,7 @@ entry_point!(test_kernel_main);
 
 /// Entry point for `cargo test`
 #[cfg(test)]
-fn test_kernel_main(_fb_info: &'static mut FrameBufferInfo) -> ! {
+fn test_kernel_main(_fb_info: &'static mut shared_lib::logger::FrameBufferInfo) -> ! {
     test_main();
     loop {}
 }

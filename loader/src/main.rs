@@ -34,7 +34,7 @@ use uefi::data_types::CStr16;
 use uefi::proto::console::gop::GraphicsOutput;
 use xmas_elf::{ElfFile, header, program};
 use shared_lib::logger::FrameBufferInfo;
-use shared_lib::{ logger, PageTable, PageTablesAllocator, map_address };
+use shared_lib::{ logger, PageTable, PageTablesAllocator, map_address, remap_address, align_down };
 use shared_lib::allocator::{ MemoryRegion, Allocator };
 
 fn convert_memory_type(t: MemoryType) -> shared_lib::allocator::MemoryType {
@@ -220,15 +220,56 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                 log::info!("Handling segment phys: {:#x}, virt: {:#x}, phys_start: {:#x}, phys_end: {:#x}",
                     header.physical_addr(), virt_start_addr, phys_start_addr, phys_end_addr);
 
-                for i in 0..(1 + header.file_size() / 4096) {
-                    log::info!("Mapping {:#x} to {:#x}", virt_start_addr + i * 4096, phys_start_addr + i * 4096);
+                let virt_start_addr_aligned = align_down(virt_start_addr);
+                let phys_start_addr_aligned = align_down(phys_start_addr);
+
+                for i in 0..(1 + (header.file_size() + virt_start_addr - virt_start_addr_aligned) / 4096) {
+                    let virt = virt_start_addr_aligned + i * 4096;
+                    let phys = phys_start_addr_aligned + i * 4096;
+
+                    log::info!("Mapping {:#x} to {:#x}", virt, phys);
                     unsafe {
-                        map_address(page_table, virt_start_addr + i * 4096, phys_start_addr + i * 4096, allocator)
+                        map_address(page_table, virt, phys, allocator)
                             .expect("Failed to map kernel");
                     }
                 }
+
+                if header.mem_size() > header.file_size() {
+                    let zero_start = virt_start_addr + header.file_size();
+                    let zero_end = virt_start_addr + header.mem_size();
+
+                    log::info!(".bss section: from {:#x} to {:#x}. size: {}", zero_start, zero_end, header.mem_size() - header.file_size());
+
+                    let data_bytes_before_zero = zero_start & 0xfff;
+
+                    if data_bytes_before_zero != 0 {
+                        let frame = allocator.allocate(1).expect("Failed to allocate new frame");
+                        log::info!("Remapping {:#x} to {:#x}", align_down(zero_start - 1), frame);
+                        unsafe {
+                            remap_address(page_table, align_down(zero_start - 1), frame, allocator)
+                                .expect("Failed to map kernel");
+
+                            log::info!("Copying from {:#x}", align_down(phys_end_addr));
+                            core::ptr::copy(
+                                align_down(phys_end_addr) as *const u8,
+                                frame as *mut _,
+                                data_bytes_before_zero as usize,
+                            );
+
+                            core::ptr::write_bytes(
+                                zero_start as *mut u8,
+                                0,
+                                (4096 - data_bytes_before_zero) as usize,
+                            );
+                        }
+                    }
+
+                    if header.mem_size() - header.file_size() > 4096 {
+                        unimplemented!(".bss section is over 4096! Implement this");
+                    }
+                }
             }
-            program::Type::Tls => { panic!("Not implemented TLS section") }
+            program::Type::Tls => { unimplemented!("Not implemented TLS section") }
             _ => {}
         }
     }
@@ -249,10 +290,10 @@ fn map_framebuffer(framebuffer: &FrameBufferInfo, page_table: &mut PageTable, al
         }
     }
 
-    let fb_info_ptr = &framebuffer as *const _ as u64;
+    let fb_info_ptr = framebuffer as *const _ as u64;
     log::info!("Mapping framebuffer info. addr: {:#x}", fb_info_ptr);
     unsafe {
-        map_address(page_table, fb_info_ptr, fb_info_ptr, allocator)
+        map_address(page_table, align_down(fb_info_ptr), align_down(fb_info_ptr), allocator)
             .expect("Failed to map fb info");
     }
     Ok(())
@@ -324,7 +365,8 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
     log::info!("FB info: {:#x}", &framebuffer as *const _ as u64);
 
     unsafe {
-        map_address(page_table, context_switch as *const () as u64, context_switch as *const () as u64, &mut allocator)
+        let ctx_switch_ptr = context_switch as *const () as u64;
+        map_address(page_table, align_down(ctx_switch_ptr), align_down(ctx_switch_ptr), &mut allocator)
             .expect("Failed to map context switch function");
 
         context_switch(page_table as *const PageTable as u64, entry_point, stack, &framebuffer);

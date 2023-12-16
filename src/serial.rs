@@ -31,14 +31,6 @@ macro_rules! wait_for {
     };
 }
 
-fn get_bit_at(input: u8, n: u8) -> bool {
-    if n < 32 {
-        input & (1 << n) != 0
-    } else {
-        false
-    }
-}
-
 #[derive(Debug)]
 pub struct SerialPort(u16 /* base port */);
 
@@ -121,7 +113,7 @@ lazy_static! {
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
     use core::fmt::Write;
-    unsafe { SERIAL1.lock().write_fmt(args).expect("Printing to serial failed"); }
+    SERIAL1.lock().write_fmt(args).expect("Printing to serial failed");
 }
 
 /// Prints to the host through the serial interface.

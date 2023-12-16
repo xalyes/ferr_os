@@ -182,8 +182,21 @@ pub trait PageTablesAllocator {
     fn allocate(&mut self, count: usize) -> Result::<u64, &'static str>;
 }
 
-unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: u64, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
+enum MappingMode {
+    CheckFrameIsFree,
+    Remapping
+}
+
+unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: u64, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator, mapping_mode: MappingMode)
                       -> core::result::Result<(), &'static str> {
+    if virt % 4096 != 0 {
+        return Err("Virtual address must be aligned!");
+    }
+
+    if phys % 4096 != 0 {
+        return Err("Physical address must be aligned!");
+    }
+
     log::trace!("Mapping {:#x} -> {:#x}", virt, phys);
 
     let l3_page_table_entry = {
@@ -200,7 +213,19 @@ unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: u64, phys: u64, 
 
     let l1_entry = &mut l1_table[get_p1_index(virt)];
     return if l1_entry.flags().contains(PageTableFlags::PRESENT) {
-        core::result::Result::Err("this virtual address already mapped to frame")
+        if l1_entry.addr() == phys {
+            log::info!("[mapper] addr {:#x} already mapped to the same physical address. doing nothing.", virt);
+            return Ok(());
+        }
+
+        match mapping_mode {
+            MappingMode::CheckFrameIsFree => Err("this virtual address already mapped to another frame"),
+            MappingMode::Remapping => {
+                l1_entry.set_addr(phys, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
+                asm!("invlpg [{}]", in(reg) phys, options(nostack, preserves_flags));
+                Ok(())
+            }
+        }
     } else {
         l1_entry.set_addr(phys, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
         asm!("invlpg [{}]", in(reg) phys, options(nostack, preserves_flags));
@@ -210,15 +235,13 @@ unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: u64, phys: u64, 
 
 pub unsafe fn map_address(l4_page_table: &mut PageTable, virt: u64, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
                           -> core::result::Result<(), &'static str> {
-    map_address_impl(l4_page_table, virt, phys, page_tables_allocator)?;
-
-    if virt % 4096 == 0 {
-        return Ok(());
-    }
-
-    map_address_impl(l4_page_table, virt + 4096, phys + 4096, page_tables_allocator)
+    map_address_impl(l4_page_table, virt, phys, page_tables_allocator, MappingMode::CheckFrameIsFree)
 }
 
+pub unsafe fn remap_address(l4_page_table: &mut PageTable, virt: u64, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
+                          -> core::result::Result<(), &'static str> {
+    map_address_impl(l4_page_table, virt, phys, page_tables_allocator, MappingMode::Remapping)
+}
 
 pub unsafe fn get_physical_address(l4_page_table: &PageTable, virt: u64) -> Option<u64> {
     let l4_entry = l4_page_table[get_p4_index(virt)];
@@ -245,4 +268,8 @@ pub unsafe fn get_physical_address(l4_page_table: &PageTable, virt: u64) -> Opti
     }
 
     Some(l1_entry.addr())
+}
+
+pub fn align_down(val: u64) -> u64 {
+    return val & 0xffff_ffff_ffff_f000;
 }
