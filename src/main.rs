@@ -23,8 +23,18 @@ use core::arch::asm;
 
 #[cfg(not(test))]
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
+fn panic(info: &PanicInfo) -> ! {
+    unsafe {
+        logger::LOGGER
+            .get()
+            .map(|l| l.force_unlock())
+    };
+
+    log::info!("{}", info);
+
+    loop {
+        unsafe { asm!("cli; hlt") };
+    }
 }
 
 // our panic handler in test mode
@@ -55,7 +65,10 @@ fn kernel_main(frame_buffer_info: &'static mut logger::FrameBufferInfo) -> ! {
     log::info!("Hello from kernel!");
     serial_println!("Hello from kernel!");
 
+    unimplemented!("Implement kernel!");
+
+    /*
     loop {
         unsafe { asm!("hlt") };
-    }
+    }*/
 }

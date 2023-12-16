@@ -223,7 +223,7 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                 let virt_start_addr_aligned = align_down(virt_start_addr);
                 let phys_start_addr_aligned = align_down(phys_start_addr);
 
-                for i in 0..(1 + (header.file_size() + virt_start_addr - virt_start_addr_aligned) / 4096) {
+                for i in 0..(1 + (header.file_size() - 1 + virt_start_addr - virt_start_addr_aligned) / 4096) {
                     let virt = virt_start_addr_aligned + i * 4096;
                     let phys = phys_start_addr_aligned + i * 4096;
 
@@ -244,9 +244,9 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
 
                     if data_bytes_before_zero != 0 {
                         let frame = allocator.allocate(1).expect("Failed to allocate new frame");
-                        log::info!("Remapping {:#x} to {:#x}", align_down(zero_start - 1), frame);
+                        log::info!("Remapping {:#x} to {:#x}", align_down(zero_start), frame);
                         unsafe {
-                            remap_address(page_table, align_down(zero_start - 1), frame, allocator)
+                            remap_address(page_table, align_down(zero_start), frame, allocator)
                                 .expect("Failed to map kernel");
 
                             log::info!("Copying from {:#x}", align_down(phys_end_addr));
@@ -260,6 +260,19 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                                 zero_start as *mut u8,
                                 0,
                                 (4096 - data_bytes_before_zero) as usize,
+                            );
+                        }
+                    } else {
+                        let frame = allocator.allocate(1).expect("Failed to allocate new frame");
+                        log::info!("Mapping {:#x} to {:#x}", align_down(zero_start), frame);
+
+                        unsafe {
+                            map_address(page_table, align_down(zero_start), frame, allocator)
+                                .expect("Failed to map kernel");
+                            core::ptr::write_bytes(
+                                zero_start as *mut u8,
+                                0,
+                                4096,
                             );
                         }
                     }
