@@ -10,11 +10,6 @@ use rust_os::entry_point;
 
 mod serial;
 
-#[test_case]
-fn trivial_assertion() {
-    assert_eq!(1, 1);
-}
-
 use core::panic::PanicInfo;
 use shared_lib::logger;
 
