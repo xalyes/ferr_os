@@ -62,13 +62,16 @@ fn kernel_main(frame_buffer_info: &'static mut logger::FrameBufferInfo) -> ! {
     log::set_logger(logger).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
-    log::info!("Hello from kernel!");
     serial_println!("Hello from kernel!");
+    log::info!("Hello from kernel!");
 
-    unimplemented!("Implement kernel!");
+    rust_os::init();
 
-    /*
-    loop {
-        unsafe { asm!("hlt") };
-    }*/
+    unsafe {
+        asm!("int3", options(nomem, nostack));
+    }
+
+    log::info!("Everything is ok");
+
+    loop {}
 }

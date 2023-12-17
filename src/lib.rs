@@ -1,6 +1,7 @@
 #![no_std]
 #![cfg_attr(test, no_main)]
 #![feature(custom_test_frameworks)]
+#![feature(abi_x86_interrupt)]
 #![test_runner(test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
@@ -8,6 +9,8 @@ use core::arch::asm;
 use core::panic::PanicInfo;
 
 pub mod serial;
+mod idt;
+mod interrupts;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -83,4 +86,8 @@ entry_point!(test_kernel_main);
 fn test_kernel_main(_fb_info: &'static mut shared_lib::logger::FrameBufferInfo) -> ! {
     test_main();
     loop {}
+}
+
+pub fn init() {
+    interrupts::init_idt();
 }

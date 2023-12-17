@@ -208,7 +208,16 @@ fn init_allocator(memory_map: uefi::table::boot::MemoryMap)
     Ok(shared_lib::allocator::Allocator::new(loader_memory_map, memory_map.entries().len() + 1))
 }
 
+#[derive(Copy, Clone)]
+struct MappedEntry {
+    pub page: u64,
+    pub frame: u64
+}
+
 fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, allocator: &mut Allocator) -> Result<(), &'static str> {
+    let mut mapped_frames: [MappedEntry; 100] = [ MappedEntry{ page: 0, frame: 0 }; 100 ];
+    let mut mapped_frames_counter = 0;
+
     for header in elf_file.program_iter() {
         match header.get_type().unwrap() {
             program::Type::Load => {
@@ -217,8 +226,8 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
 
                 let virt_start_addr = header.virtual_addr();
 
-                log::info!("Handling segment phys: {:#x}, virt: {:#x}, phys_start: {:#x}, phys_end: {:#x}",
-                    header.physical_addr(), virt_start_addr, phys_start_addr, phys_end_addr);
+                log::info!("[kernel map] segment virt: {:#x}, phys_start: {:#x}, phys_end: {:#x}",
+                    virt_start_addr, phys_start_addr, phys_end_addr);
 
                 let virt_start_addr_aligned = align_down(virt_start_addr);
                 let phys_start_addr_aligned = align_down(phys_start_addr);
@@ -227,29 +236,36 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                     let virt = virt_start_addr_aligned + i * 4096;
                     let phys = phys_start_addr_aligned + i * 4096;
 
-                    log::info!("Mapping {:#x} to {:#x}", virt, phys);
+                    log::info!("[kernel map] Mapping {:#x} to {:#x}", virt, phys);
                     unsafe {
                         map_address(page_table, virt, phys, allocator)
                             .expect("Failed to map kernel");
                     }
+                    mapped_frames[mapped_frames_counter] = MappedEntry{ page: virt, frame: phys };
+                    mapped_frames_counter += 1;
                 }
 
                 if header.mem_size() > header.file_size() {
                     let zero_start = virt_start_addr + header.file_size();
                     let zero_end = virt_start_addr + header.mem_size();
 
-                    log::info!(".bss section: from {:#x} to {:#x}. size: {}", zero_start, zero_end, header.mem_size() - header.file_size());
+                    log::info!("[kernel map] .bss section: from {:#x} to {:#x}. size: {}", zero_start, zero_end, header.mem_size() - header.file_size());
 
                     let data_bytes_before_zero = zero_start & 0xfff;
 
                     if data_bytes_before_zero != 0 {
                         let frame = allocator.allocate(1).expect("Failed to allocate new frame");
-                        log::info!("Remapping {:#x} to {:#x}", align_down(zero_start), frame);
                         unsafe {
-                            remap_address(page_table, align_down(zero_start), frame, allocator)
-                                .expect("Failed to map kernel");
+                            let frame_to_copy = align_down(phys_end_addr);
+                            for i in 0..mapped_frames_counter {
+                                if mapped_frames[i].frame == frame_to_copy {
+                                    log::info!("[kernel map] Remapping {:#x} to {:#x}", mapped_frames[i].page, frame);
+                                    remap_address(page_table, mapped_frames[i].page, frame, allocator)
+                                        .expect("Failed to map kernel");
+                                }
+                            }
 
-                            log::info!("Copying from {:#x}", align_down(phys_end_addr));
+                            log::info!("[kernel map] Copying from {:#x}", align_down(phys_end_addr));
                             core::ptr::copy(
                                 align_down(phys_end_addr) as *const u8,
                                 frame as *mut _,
@@ -257,28 +273,33 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                             );
 
                             core::ptr::write_bytes(
-                                zero_start as *mut u8,
+                                (frame + data_bytes_before_zero) as *mut u8,
                                 0,
                                 (4096 - data_bytes_before_zero) as usize,
                             );
                         }
-                    } else {
-                        let frame = allocator.allocate(1).expect("Failed to allocate new frame");
-                        log::info!("Mapping {:#x} to {:#x}", align_down(zero_start), frame);
-
-                        unsafe {
-                            map_address(page_table, align_down(zero_start), frame, allocator)
-                                .expect("Failed to map kernel");
-                            core::ptr::write_bytes(
-                                zero_start as *mut u8,
-                                0,
-                                4096,
-                            );
-                        }
                     }
 
-                    if header.mem_size() - header.file_size() > 4096 {
-                        unimplemented!(".bss section is over 4096! Implement this");
+                    if header.mem_size() - header.file_size() > (4096 - data_bytes_before_zero) {
+                        let zero_start_aligned = zero_start + (4096 - data_bytes_before_zero);
+                        let bytes_to_allocate = header.mem_size() - header.file_size() - (4096 - data_bytes_before_zero);
+                        log::info!("[kernel map] bytes_to_allocate: {}", bytes_to_allocate);
+
+                        for i in 0..(1 + bytes_to_allocate / 4096) {
+                            let frame = allocator.allocate(1).expect("Failed to allocate new frame");
+                            let virt_ptr = zero_start_aligned + i * 4096;
+                            log::info!("[kernel map] Mapping {:#x} to {:#x}", virt_ptr, frame);
+
+                            unsafe {
+                                map_address(page_table, virt_ptr, frame, allocator)
+                                    .expect("Failed to map kernel");
+                                core::ptr::write_bytes(
+                                    frame as *mut u8,
+                                    0,
+                                    4096,
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -338,7 +359,7 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
 
     log::info!("This is a very simple UEFI bootloader");
 
-    let kernel_max_size = 10 * 4096;
+    let kernel_max_size = 20 * 4096;
     let kernel = load_kernel(image, &mut system_table, kernel_max_size)
         .expect("Failed to load kernel");
 
