@@ -1,6 +1,8 @@
+use core::arch::asm;
 use bitflags::bitflags;
 use crate::addr::VirtAddr;
 use lazy_static::lazy_static;
+use crate::bits::{get_bits, set_bits};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(4))]
@@ -116,6 +118,15 @@ impl SegmentSelector {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed(2))]
+pub struct DescriptorTablePointer {
+    /// Size of the DT.
+    pub limit: u16,
+    /// Pointer to the memory region containing the DT.
+    pub base: VirtAddr,
+}
+
 #[derive(Debug, Clone)]
 pub struct GlobalDescriptorTable {
     table: [u64; 8],
@@ -159,6 +170,27 @@ impl GlobalDescriptorTable {
             }
         };
         SegmentSelector::new(index as u16, entry.dpl())
+    }
+
+    #[inline]
+    pub fn load(&'static self) {
+        // SAFETY: static lifetime ensures no modification after loading.
+        unsafe { self.load_unsafe() };
+    }
+
+    #[inline]
+    pub unsafe fn load_unsafe(&self) {
+        unsafe {
+            asm!("lgdt [{}]", in(reg) &self.pointer(), options(readonly, nostack, preserves_flags));
+        }
+    }
+
+    fn pointer(&self) -> DescriptorTablePointer {
+        use core::mem::size_of;
+        DescriptorTablePointer {
+            base: VirtAddr::new(self.table.as_ptr() as u64),
+            limit: (self.len * size_of::<u64>() - 1) as u16,
+        }
     }
 }
 
@@ -234,6 +266,20 @@ impl Descriptor {
     }
 
     #[inline]
+    pub const fn kernel_data_segment() -> Descriptor {
+        Descriptor::UserSegment
+            ( DescriptorFlags::USER_SEGMENT.bits()
+                | DescriptorFlags::PRESENT.bits()
+                | DescriptorFlags::WRITABLE.bits()
+                | DescriptorFlags::ACCESSED.bits()
+                | DescriptorFlags::LIMIT_0_15.bits()
+                | DescriptorFlags::LIMIT_16_19.bits()
+                | DescriptorFlags::GRANULARITY.bits()
+                | DescriptorFlags::DEFAULT_SIZE.bits()
+            )
+    }
+
+    #[inline]
     pub fn tss_segment(tss: &'static TaskStateSegment) -> Descriptor {
         // SAFETY: The pointer is derived from a &'static reference, which ensures its validity.
         unsafe { Self::tss_segment_unchecked(tss) }
@@ -251,39 +297,67 @@ impl Descriptor {
 
     #[inline]
     pub unsafe fn tss_segment_unchecked(tss: *const TaskStateSegment) -> Descriptor {
-        /*use self::DescriptorFlags as Flags;
+        use self::DescriptorFlags as Flags;
         use core::mem::size_of;
 
         let ptr = tss as u64;
 
         let mut low = Flags::PRESENT.bits();
 
-        // base. [0, 23] bits
-        low |= (ptr & 0xff_fff);
+        // base
+        set_bits(&mut low, get_bits(ptr, 0..24), 16);
+        set_bits(&mut low, get_bits(ptr, 24..32), 56);
 
-        // base. [24, 31] bits
-        low |= (ptr & 0xff_fff);
-
-
-        low.set_bits(56..64, ptr.get_bits(24..32));
         // limit (the `-1` in needed since the bound is inclusive)
-        low.set_bits(0..16, (size_of::<TaskStateSegment>() - 1) as u64);
+        set_bits(&mut low, (size_of::<TaskStateSegment>() - 1) as u64, 0);
+
         // type (0b1001 = available 64-bit tss)
-        low.set_bits(40..44, 0b1001);
+        set_bits(&mut low, 0b1001, 40);
 
         let mut high = 0;
-        high.set_bits(0..32, ptr.get_bits(32..64));
+        set_bits(&mut high, get_bits(ptr, 32..64), 0);
 
-        Descriptor::SystemSegment(low, high)*/
-        Descriptor::SystemSegment(0, 0)
+        Descriptor::SystemSegment(low, high)
     }
 }
 
+struct GdtAndSelectors {
+    pub gdt: GlobalDescriptorTable,
+    pub code_selector: SegmentSelector,
+    pub tss_selector: SegmentSelector,
+    pub data_selector: SegmentSelector
+}
+
 lazy_static! {
-    static ref GDT: GlobalDescriptorTable = {
+    static ref GDT: GdtAndSelectors = {
         let mut gdt = GlobalDescriptorTable::new();
-        gdt.add_entry(Descriptor::kernel_code_segment());
-        gdt.add_entry(Descriptor::tss_segment(&TSS));
-        gdt
+        let code_selector = gdt.add_entry(Descriptor::kernel_code_segment());
+        let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));
+        let data_selector = gdt.add_entry(Descriptor::kernel_data_segment());
+        GdtAndSelectors { gdt: gdt, code_selector: code_selector, tss_selector: tss_selector, data_selector: data_selector }
     };
+}
+
+pub fn init() {
+    GDT.gdt.load();
+
+    unsafe {
+        asm!(
+            "push {sel}",
+            "lea {tmp}, [1f + rip]",
+            "push {tmp}",
+            "retfq",
+            "1:",
+            sel = in(reg) GDT.code_selector.0 as u64,
+            tmp = lateout(reg) _,
+            options(preserves_flags),
+        );
+
+        asm!("mov ds, {0:x}", in(reg) GDT.data_selector.0, options(nostack, preserves_flags));
+        asm!("mov es, {0:x}", in(reg) GDT.data_selector.0, options(nostack, preserves_flags));
+        asm!("mov ss, {0:x}", in(reg) GDT.data_selector.0, options(nostack, preserves_flags));
+
+        asm!("ltr {0:x}", in(reg) GDT.tss_selector.0, options(nostack, preserves_flags));
+    }
+
 }

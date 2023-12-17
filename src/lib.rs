@@ -92,5 +92,6 @@ fn test_kernel_main(_fb_info: &'static mut shared_lib::logger::FrameBufferInfo) 
 }
 
 pub fn init() {
+    gdt::init();
     interrupts::init_idt();
 }
