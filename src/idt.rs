@@ -4,6 +4,7 @@ use core::arch::asm;
 use core::fmt;
 use core::marker::PhantomData;
 use bitflags::bitflags;
+use crate::bits::get_bits;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -23,6 +24,17 @@ impl EntryOptions {
         let mask = 1 << 15;
 
         self.0 |= mask;
+        self
+    }
+
+    #[inline]
+    pub unsafe fn set_stack_index(&mut self, index: u16) -> &mut Self {
+        // The hardware IST index starts at 1, but our software IST index
+        // starts at 0. Therefore we need to add 1 here.
+        let mask = index + 1;
+
+        self.0 |= get_bits(mask as u64, 0..3) as u16;
+
         self
     }
 }
@@ -300,12 +312,6 @@ impl InterruptDescriptorTable {
             reserved_3: Entry::missing(),
             interrupts: [Entry::missing(); 256 - 32],
         }
-    }
-
-    /// Resets all entries of this IDT in place.
-    #[inline]
-    pub fn reset(&mut self) {
-        *self = Self::new();
     }
 
     #[inline]

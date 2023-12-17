@@ -62,6 +62,15 @@ fn kernel_main(frame_buffer_info: &'static mut logger::FrameBufferInfo) -> ! {
 
     rust_os::init();
 
+    #[inline(never)]
+    fn stack_overflow() {
+        stack_overflow();
+        stack_overflow();
+    }
+
+    // trigger a stack overflow
+    stack_overflow();
+
     unsafe {
         asm!("int3", options(nomem, nostack));
     }

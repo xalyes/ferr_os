@@ -31,3 +31,7 @@ bitflags = "2.4.1"
 [[test]]
 name = "should_panic"
 harness = false
+
+[[test]]
+name = "stack_overflow"
+harness = false

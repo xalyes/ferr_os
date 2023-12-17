@@ -9,9 +9,9 @@ use core::arch::asm;
 use core::panic::PanicInfo;
 
 pub mod serial;
-mod idt;
+pub mod idt;
 mod interrupts;
-mod gdt;
+pub mod gdt;
 mod addr;
 mod bits;
 
@@ -87,6 +87,7 @@ entry_point!(test_kernel_main);
 /// Entry point for `cargo test`
 #[cfg(test)]
 fn test_kernel_main(_fb_info: &'static mut shared_lib::logger::FrameBufferInfo) -> ! {
+    init();
     test_main();
     loop {}
 }
