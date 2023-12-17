@@ -11,6 +11,9 @@ use core::panic::PanicInfo;
 pub mod serial;
 mod idt;
 mod interrupts;
+mod gdt;
+mod addr;
+mod bits;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
