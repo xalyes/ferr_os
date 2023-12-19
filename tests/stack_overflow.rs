@@ -4,7 +4,8 @@
 
 use core::panic::PanicInfo;
 use lazy_static::lazy_static;
-use rust_os::{exit_qemu, QemuExitCode, serial_print};
+use shared_lib::serial_print;
+use shared_lib::{exit_qemu, QemuExitCode};
 use rust_os::idt::{InterruptStackFrame, InterruptDescriptorTable };
 
 #[no_mangle]

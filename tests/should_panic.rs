@@ -1,8 +1,10 @@
 #![no_std]
 #![no_main]
 
+use core::arch::asm;
 use core::panic::PanicInfo;
-use rust_os::{QemuExitCode, exit_qemu, serial_println, serial_print};
+use shared_lib::{serial_println, serial_print};
+use shared_lib::{QemuExitCode, exit_qemu};
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
@@ -16,7 +18,11 @@ pub extern "C" fn _start() -> ! {
 fn panic(_info: &PanicInfo) -> ! {
     serial_println!("[ok]");
     exit_qemu(QemuExitCode::Success);
-    loop {}
+    loop {
+        unsafe {
+            asm!("hlt", options(nomem, nostack, preserves_flags));
+        }
+    }
 }
 
 fn should_fail() {

@@ -3,6 +3,7 @@ use core::fmt;
 use spin::Mutex;
 use lazy_static::lazy_static;
 use bitflags::bitflags;
+use crate::interrupts::without_interrupts;
 
 bitflags! {
     /// Line status flags
@@ -113,7 +114,10 @@ lazy_static! {
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
     use core::fmt::Write;
-    SERIAL1.lock().write_fmt(args).expect("Printing to serial failed");
+
+    without_interrupts(|| {
+        SERIAL1.lock().write_fmt(args).expect("Printing to serial failed");
+    });
 }
 
 /// Prints to the host through the serial interface.

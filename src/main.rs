@@ -1,14 +1,12 @@
 #![no_std]
 #![no_main]
 #![feature(custom_test_frameworks)]
-#![test_runner(rust_os::test_runner)]
+#![test_runner(shared_lib::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 extern crate shared_lib;
 
 use rust_os::entry_point;
-
-mod serial;
 
 use core::panic::PanicInfo;
 use shared_lib::logger;
@@ -28,7 +26,9 @@ fn panic(info: &PanicInfo) -> ! {
     log::info!("{}", info);
 
     loop {
-        unsafe { asm!("cli; hlt") };
+        unsafe {
+            asm!("hlt", options(nomem, nostack, preserves_flags));
+        }
     }
 }
 
@@ -55,27 +55,18 @@ entry_point!(kernel_main);
 fn kernel_main(frame_buffer_info: &'static mut logger::FrameBufferInfo) -> ! {
     let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(*frame_buffer_info));
     log::set_logger(logger).unwrap();
-    log::set_max_level(log::LevelFilter::Info);
+    log::set_max_level(log::LevelFilter::Trace);
 
-    serial_println!("Hello from kernel!");
+    shared_lib::serial_println!("Hello from kernel!");
     log::info!("Hello from kernel!");
 
     rust_os::init();
 
-    #[inline(never)]
-    fn stack_overflow() {
-        stack_overflow();
-        stack_overflow();
-    }
-
-    // trigger a stack overflow
-    stack_overflow();
-
-    unsafe {
-        asm!("int3", options(nomem, nostack));
-    }
-
     log::info!("Everything is ok");
 
-    loop {}
+    loop {
+        unsafe {
+            asm!("hlt", options(nomem, nostack, preserves_flags));
+        }
+    }
 }

@@ -2,39 +2,28 @@
 #![cfg_attr(test, no_main)]
 #![feature(custom_test_frameworks)]
 #![feature(abi_x86_interrupt)]
-#![test_runner(test_runner)]
+#![test_runner(shared_lib::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 use core::arch::asm;
 use core::panic::PanicInfo;
+use shared_lib::serial_println;
 
-pub mod serial;
 pub mod idt;
 mod interrupts;
 pub mod gdt;
 mod addr;
-mod bits;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum QemuExitCode {
-    Success = 0x10,
-    Failed = 0x11,
-}
-
-pub fn exit_qemu(exit_code: QemuExitCode) {
-    unsafe {
-        let port = 0xf4;
-        let value = exit_code as u8;
-        asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack, preserves_flags));
-    }
-}
+mod pic;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");
     serial_println!("Error: {}\n", info);
-    exit_qemu(QemuExitCode::Failed);
-    loop {}
+    shared_lib::exit_qemu(shared_lib::QemuExitCode::Failed);
+    loop {
+        unsafe {
+            asm!("hlt", options(nomem, nostack, preserves_flags));
+        }
+    }
 }
 
 // our panic handler in test mode
@@ -42,30 +31,6 @@ pub fn test_panic_handler(info: &PanicInfo) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     test_panic_handler(info)
-}
-
-pub trait Testable {
-    fn run(&self) -> ();
-}
-
-impl<T> Testable for T
-    where
-        T: Fn(),
-{
-    fn run(&self) {
-        serial_print!("{}...\t", core::any::type_name::<T>());
-        self();
-        serial_println!("[ok]");
-    }
-}
-
-pub fn test_runner(tests: &[&dyn Testable]) {
-    serial_println!("Running {} tests", tests.len());
-    for test in tests {
-        test.run();
-    }
-
-    exit_qemu(QemuExitCode::Success);
 }
 
 #[macro_export]
@@ -84,15 +49,23 @@ macro_rules! entry_point {
 #[cfg(test)]
 entry_point!(test_kernel_main);
 
-/// Entry point for `cargo test`
 #[cfg(test)]
 fn test_kernel_main(_fb_info: &'static mut shared_lib::logger::FrameBufferInfo) -> ! {
     init();
     test_main();
-    loop {}
+    loop {
+        unsafe {
+            asm!("hlt", options(nomem, nostack, preserves_flags));
+        }
+    }
 }
 
 pub fn init() {
     gdt::init();
     interrupts::init_idt();
+
+    unsafe { interrupts::PICS.lock().initialize(); };
+
+    // Enable hardware interrupts
+    unsafe { asm!("sti", options(nomem, nostack)); }
 }

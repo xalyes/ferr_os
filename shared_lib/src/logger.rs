@@ -1,10 +1,12 @@
 use core::fmt;
 use core::slice::from_raw_parts_mut;
 use core::ptr::read_volatile;
-use spinning_top::Spinlock;
+use spinning_top::{RawSpinlock, Spinlock};
 use conquer_once::spin::OnceCell;
 use core::fmt::Write;
 use font8x8::UnicodeFonts;
+use spinning_top::lock_api::MutexGuard;
+use crate::interrupts;
 
 #[derive(Clone, Copy)]
 pub enum PixelFormat {
@@ -124,6 +126,10 @@ impl LockedLogger {
         LockedLogger(Spinlock::new(Logger::new(fb_info)))
     }
 
+    pub fn lock(&self) -> MutexGuard<'_, RawSpinlock, Logger> {
+        self.0.lock()
+    }
+
     /// Force-unlocks the logger to prevent a deadlock.
     ///
     /// This method is not memory safe and should be only used when absolutely necessary.
@@ -138,8 +144,10 @@ impl log::Log for LockedLogger {
     }
 
     fn log(&self, record: &log::Record) {
-        let mut logger = self.0.lock();
-        writeln!(logger, "{}:    {}", record.level(), record.args()).unwrap();
+        interrupts::without_interrupts(|| {
+            let mut logger = self.0.lock();
+            writeln!(logger, "{}:    {}", record.level(), record.args()).unwrap();
+        });
     }
 
     fn flush(&self) {}
