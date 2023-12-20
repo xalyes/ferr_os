@@ -1,5 +1,6 @@
+use core::arch::asm;
 use core::fmt;
-use crate::idt::{InterruptStackFrame, InterruptDescriptorTable};
+use crate::idt::{InterruptStackFrame, InterruptDescriptorTable, PageFaultErrorCode};
 use lazy_static::lazy_static;
 use crate::gdt;
 use spin;
@@ -42,6 +43,7 @@ lazy_static! {
         idt.general_protection_fault.set_handler_fn(general_protection_fault_handler);
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
+        idt.page_fault.set_handler_fn(page_fault_handler);
 
         idt
     };
@@ -109,10 +111,32 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     }
 }
 
+extern "x86-interrupt" fn page_fault_handler(
+    stack_frame: InterruptStackFrame,
+    error_code: PageFaultErrorCode,
+) {
+    log::info!("EXCEPTION: PAGE FAULT");
+
+    let cr2: u64;
+    unsafe {
+        asm!("mov {}, cr2", out(reg) cr2, options(nomem, nostack, preserves_flags));
+    }
+
+    log::info!("Accessed Address: {:#x}", cr2);
+    log::info!("Error Code: {:?}", error_code);
+    log::info!("{:#?}", stack_frame);
+
+    loop {
+        unsafe {
+            asm!("hlt", options(nomem, nostack, preserves_flags));
+        }
+    }
+}
+
 #[test_case]
 fn test_breakpoint_exception() {
     // invoke a breakpoint exception
     unsafe {
-        core::arch::asm!("int3", options(nomem, nostack));
+        asm!("int3", options(nomem, nostack));
     }
 }
