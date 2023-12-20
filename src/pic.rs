@@ -144,7 +144,7 @@ impl ChainedPics {
         wait();
 
         // Restore our saved masks except timer bit
-        self.pics[0].write_mask(saved_masks[0] & 0);
+        self.pics[0].write_mask(saved_masks[0] & 0b1111_1100);
         self.pics[1].write_mask(saved_masks[1]);
     }
 

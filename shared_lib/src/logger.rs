@@ -3,7 +3,7 @@ use core::slice::from_raw_parts_mut;
 use core::ptr::read_volatile;
 use spinning_top::{RawSpinlock, Spinlock};
 use conquer_once::spin::OnceCell;
-use core::fmt::Write;
+use core::fmt::{Arguments, Write};
 use font8x8::UnicodeFonts;
 use spinning_top::lock_api::MutexGuard;
 use crate::interrupts;
@@ -130,6 +130,12 @@ impl LockedLogger {
         self.0.lock()
     }
 
+    pub fn write_fmt(&self, arguments: Arguments ) {
+        interrupts::without_interrupts(|| {
+            self.0.lock().write_fmt(arguments).unwrap();
+        });
+    }
+
     /// Force-unlocks the logger to prevent a deadlock.
     ///
     /// This method is not memory safe and should be only used when absolutely necessary.
@@ -152,3 +158,11 @@ impl log::Log for LockedLogger {
 
     fn flush(&self) {}
 }
+
+#[macro_export]
+macro_rules! out {
+    ($($arg:tt)*) => {
+        LOGGER.get().unwrap().write_fmt(format_args!($($arg)*));
+    };
+}
+
