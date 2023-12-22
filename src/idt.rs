@@ -1,10 +1,10 @@
-use crate::addr::VirtAddr;
-
 use core::arch::asm;
 use core::fmt;
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 use bitflags::bitflags;
+
+use shared_lib::addr::VirtAddr;
 use shared_lib::bits::get_bits;
 
 #[repr(transparent)]
@@ -187,7 +187,7 @@ impl<F> Entry<F> {
             | (self.pointer_high as u64) << 32;
         // addr is a valid VirtAddr, as the pointer members are either all zero,
         // or have been set by set_handler_addr (which takes a VirtAddr).
-        VirtAddr::new_truncate(addr)
+        VirtAddr::new(addr)
     }
 }
 

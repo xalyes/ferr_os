@@ -1,8 +1,8 @@
 use core::arch::asm;
 use bitflags::bitflags;
-use crate::addr::VirtAddr;
 use lazy_static::lazy_static;
 use shared_lib::bits::{get_bits, set_bits};
+use shared_lib::addr::VirtAddr;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(4))]

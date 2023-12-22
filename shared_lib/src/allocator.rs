@@ -1,4 +1,4 @@
-use crate::{PageTable, PageTablesAllocator};
+use crate::page_table::{PageTable, PageTablesAllocator};
 
 #[derive(Debug)]
 pub enum MemoryType {

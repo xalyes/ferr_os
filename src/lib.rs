@@ -12,7 +12,6 @@ use shared_lib::serial_println;
 pub mod idt;
 mod interrupts;
 pub mod gdt;
-mod addr;
 mod pic;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
