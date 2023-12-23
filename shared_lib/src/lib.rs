@@ -15,6 +15,8 @@ pub mod page_table;
 use core::arch::asm;
 use core::panic::PanicInfo;
 
+pub const VIRT_MAPPING_OFFSET: u64 = 0x180_0000_0000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum QemuExitCode {

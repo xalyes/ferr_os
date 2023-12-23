@@ -18,7 +18,7 @@ pub struct MemoryRegion {
 
 #[repr(align(4096))]
 pub struct Allocator<'a> {
-    memory_map: &'a mut [MemoryRegion],
+    pub memory_map: &'a mut [MemoryRegion],
     size: usize
 }
 

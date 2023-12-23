@@ -35,8 +35,8 @@ use uefi::proto::console::gop::GraphicsOutput;
 use xmas_elf::{ElfFile, header, program};
 use shared_lib::addr::VirtAddr;
 use shared_lib::logger::FrameBufferInfo;
-use shared_lib::page_table::{ PageTable, PageTablesAllocator, map_address, remap_address, align_down, align_down_u64 };
-use shared_lib::logger;
+use shared_lib::page_table::{PageTable, PageTablesAllocator, map_address, remap_address, align_down, align_down_u64, PageTableFlags, get_physical_address};
+use shared_lib::{logger, VIRT_MAPPING_OFFSET};
 use shared_lib::allocator::{ MemoryRegion, Allocator };
 
 fn convert_memory_type(t: MemoryType) -> shared_lib::allocator::MemoryType {
@@ -146,7 +146,7 @@ fn init_allocator(memory_map: uefi::table::boot::MemoryMap)
     -> Result<shared_lib::allocator::Allocator, &'static str> {
 
     let memory_map_size = core::mem::size_of::<shared_lib::allocator::MemoryRegion>() * memory_map.entries().count();
-    let pages_to_find = 1 + (memory_map_size / 4096);
+    let pages_to_find = 1 + (memory_map_size / 4096) + 10;
     log::info!("Finding region for loader's memory map... Needed size: {} - {} pages", memory_map_size, pages_to_find);
 
     let mut find_result: Option<(u64, usize)> = None;
@@ -322,7 +322,7 @@ fn map_framebuffer(framebuffer: &FrameBufferInfo, page_table: &mut PageTable, al
     for i in 0..pages_needed_for_fb {
         let ptr = fb_start + i as u64 * 4096;
         unsafe {
-            map_address(page_table, VirtAddr::new_checked(ptr).unwrap(), ptr, allocator)
+            map_address(page_table, VirtAddr::new_checked(ptr + VIRT_MAPPING_OFFSET).unwrap(), ptr, allocator)
                 .expect("Failed to map framebuffer");
         }
     }
@@ -353,7 +353,7 @@ fn create_stack(stack_depth: usize, page_table: &mut PageTable, allocator: &mut 
 
 #[entry]
 fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi::table::Boot>) -> uefi::Status {
-    let framebuffer = init_framebuffer(image, &mut system_table)
+    let mut framebuffer = init_framebuffer(image, &mut system_table)
         .expect("Failed to init framebuffer");
 
     let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(framebuffer));
@@ -372,6 +372,9 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
     log::info!("Exiting boot services...");
     let (_runtime_system_table, memory_map) = system_table.exit_boot_services(MemoryType::LOADER_DATA);
 
+    let last_memory_region = memory_map.entries().last().unwrap();
+    let last_frame_addr = last_memory_region.phys_start + (last_memory_region.page_count - 1) * 4096;
+
     let mut allocator = init_allocator(memory_map)
         .expect("Failed to create Allocator");
 
@@ -384,11 +387,24 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
         &mut *page_table_ptr
     };
 
+    log::info!("Mapping all memory. Last frame: {:#x}", last_frame_addr);
+
+    for i in 0..(last_frame_addr / 4096) {
+        let phys =  i * 4096;
+        let virt = VirtAddr::new(phys + VIRT_MAPPING_OFFSET);
+
+        unsafe {
+            map_address(page_table, virt, phys, &mut allocator)
+                .expect("Failed to map memory");
+        }
+    }
+
     map_kernel(&elf_file, kernel as u64, page_table, &mut allocator)
         .expect("Failed to map kernel");
 
     map_framebuffer(&framebuffer, page_table, &mut allocator)
         .expect("Failed to map framebuffer");
+    framebuffer.addr += VIRT_MAPPING_OFFSET;
 
     let stack = create_stack(20, page_table, &mut allocator)
         .expect("Failed to create stack");
@@ -399,6 +415,7 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
     log::info!("rsp: {:#x}", stack);
     log::info!("Jumping to kernel entry point at {:#x}", entry_point);
     log::info!("Kernel address: {:#x}", kernel as u64);
+    log::info!("FB addr: {:#x}", framebuffer.addr);
     log::info!("FB info: {:#x}", &framebuffer as *const _ as u64);
 
     unsafe {
