@@ -7,6 +7,7 @@
 extern crate shared_lib;
 
 use rust_os::entry_point;
+use rust_os::memory::active_level_4_table;
 
 use core::panic::PanicInfo;
 use shared_lib::logger;
@@ -61,6 +62,16 @@ fn kernel_main(frame_buffer_info: &'static mut logger::FrameBufferInfo) -> ! {
     log::info!("Hello from kernel!");
 
     rust_os::init();
+
+    let l4_table = unsafe {
+        active_level_4_table()
+    };
+
+    for i in 0..512 {
+        if l4_table[i].is_present() {
+            log::info!("L4 Entry {}: {:#x}", i, l4_table[i].addr());
+        }
+    }
 
     log::info!("Everything is ok");
 

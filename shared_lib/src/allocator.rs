@@ -1,6 +1,7 @@
+use core::ops::{Deref, DerefMut};
 use crate::page_table::{PageTable, PageTablesAllocator};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum MemoryType {
     Free,
     Reserved,
@@ -10,30 +11,75 @@ pub enum MemoryType {
     Acpi1_4,
 }
 
+#[derive(Copy, Clone)]
 pub struct MemoryRegion {
     pub ty: MemoryType,
     pub addr: u64,
     pub page_count: usize
 }
 
-#[repr(align(4096))]
-pub struct Allocator<'a> {
-    pub memory_map: &'a mut [MemoryRegion],
-    size: usize
+pub const MAX_MEMORY_MAP_SIZE: usize = 256;
+
+#[repr(C)]
+pub struct MemoryMap {
+    pub entries: &'static mut [MemoryRegion; MAX_MEMORY_MAP_SIZE],
+    pub next_free_entry_idx: u64
 }
 
-impl<'a> Allocator<'a> {
-    pub fn new(memory_map: &'a mut [MemoryRegion], size: usize) -> Self {
-        Allocator {
-            memory_map,
-            size
-        }
+impl MemoryMap {
+    fn next_free_entry_index(&self) -> usize {
+        self.next_free_entry_idx as usize
     }
 }
 
-impl PageTablesAllocator for Allocator<'_> {
+impl Deref for MemoryMap {
+    type Target = [MemoryRegion];
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries[0..self.next_free_entry_index()]
+    }
+}
+
+impl DerefMut for MemoryMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let next_index = self.next_free_entry_index();
+        &mut self.entries[0..next_index]
+    }
+}
+
+#[repr(align(4096))]
+pub struct Allocator {
+    pub memory_map: MemoryMap,
+    next_free_frame: usize
+}
+
+impl Allocator {
+    pub fn new(memory_map: MemoryMap) -> Self {
+        Allocator {
+            memory_map,
+            next_free_frame: 0
+        }
+    }
+
+    fn usable_frames(&self) -> impl Iterator<Item = u64> + '_ {
+        // get usable regions from memory map
+        let regions = self.memory_map.iter();
+        let usable_regions = regions.filter(|r| r.ty == MemoryType::Free);
+
+        // map each region to its address range
+        let addr_ranges = usable_regions.map(|r| r.addr..(r.addr + 4096 * r.page_count as u64));
+
+        // transform to an iterator of frame start addresses
+        addr_ranges.flat_map(|r| r.step_by(4096))
+    }
+}
+
+impl PageTablesAllocator for Allocator {
     fn allocate_page_table(&mut self) -> Result::<&mut PageTable, &'static str> {
-        for region in self.memory_map.iter_mut() {
+        let mut memory_map = &mut self.memory_map;
+        let next_free_entry_idx = &mut memory_map.next_free_entry_idx;
+
+        for region in memory_map.iter_mut() {
             match &region.ty {
                 MemoryType::Free => {
                     let addr = if region.page_count == 1 {
@@ -42,12 +88,12 @@ impl PageTablesAllocator for Allocator<'_> {
                     } else {
                         region.page_count -= 1;
                         let new_region_addr = region.addr + (region.page_count * 4096) as u64;
-                        self.memory_map[self.size] = MemoryRegion {
+                        memory_map.entries[memory_map.next_free_entry_idx as usize] = MemoryRegion {
                             ty: MemoryType::InUse,
                             addr: new_region_addr,
                             page_count: 1
                         };
-                        self.size += 1;
+                        memory_map.next_free_entry_idx += 1;
                         new_region_addr
                     };
                     log::info!("Allocated page table. Addr: {:#x}", addr);
@@ -62,7 +108,10 @@ impl PageTablesAllocator for Allocator<'_> {
     }
 
     fn allocate(&mut self, count: usize) -> Result<u64, &'static str> {
-        for region in self.memory_map.iter_mut() {
+        let mut memory_map = &mut self.memory_map;
+        let next_free_entry_idx = &mut memory_map.next_free_entry_idx;
+
+        for region in memory_map.iter_mut() {
             match &region.ty {
                 MemoryType::Free => {
                     if region.page_count < count {
@@ -75,12 +124,12 @@ impl PageTablesAllocator for Allocator<'_> {
                     } else {
                         region.page_count -= count;
                         let new_region_addr = region.addr + (region.page_count * 4096) as u64;
-                        self.memory_map[self.size] = MemoryRegion {
+                        memory_map.entries[memory_map.next_free_entry_idx as usize] = MemoryRegion {
                             ty: MemoryType::InUse,
                             addr: new_region_addr,
                             page_count: count
                         };
-                        self.size += 1;
+                        memory_map.next_free_entry_idx += 1;
                         new_region_addr
                     };
                     log::info!("Allocated region for {} pages. Addr: {:#x}", count, addr);

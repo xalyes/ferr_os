@@ -13,6 +13,7 @@ pub mod idt;
 mod interrupts;
 pub mod gdt;
 mod pic;
+pub mod memory;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");

@@ -29,6 +29,11 @@ impl PageTableEntry {
         PageTableFlags::from_bits_truncate(self.entry)
     }
 
+    #[inline]
+    pub const fn is_present(&self) -> bool {
+        self.flags().contains(PageTableFlags::PRESENT)
+    }
+
     /// Returns the physical address mapped by this entry, might be zero.
     #[inline]
     pub fn addr(&self) -> u64 {

@@ -37,7 +37,7 @@ use shared_lib::addr::VirtAddr;
 use shared_lib::logger::FrameBufferInfo;
 use shared_lib::page_table::{PageTable, PageTablesAllocator, map_address, remap_address, align_down, align_down_u64, PageTableFlags, get_physical_address};
 use shared_lib::{logger, VIRT_MAPPING_OFFSET};
-use shared_lib::allocator::{ MemoryRegion, Allocator };
+use shared_lib::allocator::{MemoryRegion, Allocator, MemoryMap};
 
 fn convert_memory_type(t: MemoryType) -> shared_lib::allocator::MemoryType {
     match t {
@@ -142,43 +142,16 @@ fn load_kernel(image: uefi::Handle, system_table: &mut uefi::table::SystemTable<
     Ok(kernel.as_ptr())
 }
 
-fn init_allocator(memory_map: uefi::table::boot::MemoryMap)
-    -> Result<shared_lib::allocator::Allocator, &'static str> {
+unsafe fn init_allocator(memory_map: uefi::table::boot::MemoryMap)
+                         -> Result<shared_lib::allocator::Allocator, &'static str> {
 
-    let memory_map_size = core::mem::size_of::<shared_lib::allocator::MemoryRegion>() * memory_map.entries().count();
-    let pages_to_find = 1 + (memory_map_size / 4096) + 10;
-    log::info!("Finding region for loader's memory map... Needed size: {} - {} pages", memory_map_size, pages_to_find);
+    static mut MMAP_ARRAY: [MemoryRegion; shared_lib::allocator::MAX_MEMORY_MAP_SIZE]
+        = [MemoryRegion{ ty: shared_lib::allocator::MemoryType::Reserved, addr: 0, page_count: 0 }; shared_lib::allocator::MAX_MEMORY_MAP_SIZE];
 
-    let mut find_result: Option<(u64, usize)> = None;
-    for memory_descriptor in memory_map.entries() {
-        if memory_descriptor.page_count >= pages_to_find as u64
-            && matches!(convert_memory_type(memory_descriptor.ty), shared_lib::allocator::MemoryType::Free)
-            && memory_descriptor.phys_start != 0 {
-            find_result = Option::from((memory_descriptor.phys_start, memory_descriptor.page_count as usize));
-            break;
-        }
-    }
-    let memory_region_for_memory_map = find_result
-        .expect("Failed to find memory region for memory map");
-
-    let loader_memory_map = unsafe { from_raw_parts_mut(memory_region_for_memory_map.0 as *mut MemoryRegion, pages_to_find * 4096) };
-
-    log::info!("Found suitable memory region: addr: {:#x} pages: {}", find_result.unwrap().0, find_result.unwrap().1);
-
+    log::info!("len {}", memory_map.entries().len());
     for (idx, memory_descriptor) in memory_map.entries().enumerate() {
-        if memory_descriptor.phys_start == find_result.unwrap().0 {
-            if pages_to_find < memory_descriptor.page_count as usize {
-                loader_memory_map[idx] = shared_lib::allocator::MemoryRegion {
-                    ty: shared_lib::allocator::MemoryType::Free,
-                    addr: memory_descriptor.phys_start + (4096 * pages_to_find) as u64,
-                    page_count: memory_descriptor.page_count as usize - pages_to_find
-                };
-                continue;
-            }
-        }
-
         if memory_descriptor.phys_start == 0 {
-            loader_memory_map[idx] = shared_lib::allocator::MemoryRegion {
+            MMAP_ARRAY[idx] = shared_lib::allocator::MemoryRegion {
                 ty: shared_lib::allocator::MemoryType::Reserved,
                 addr: memory_descriptor.phys_start,
                 page_count: memory_descriptor.page_count as usize
@@ -186,28 +159,20 @@ fn init_allocator(memory_map: uefi::table::boot::MemoryMap)
             continue;
         }
 
-        loader_memory_map[idx] = shared_lib::allocator::MemoryRegion {
+        MMAP_ARRAY[idx] = shared_lib::allocator::MemoryRegion {
             ty: convert_memory_type(memory_descriptor.ty),
             addr: memory_descriptor.phys_start,
             page_count: memory_descriptor.page_count as usize
         };
     }
 
-    loader_memory_map[memory_map.entries().len()] = shared_lib::allocator::MemoryRegion {
-        ty: shared_lib::allocator::MemoryType::InUse,
-        addr: find_result.unwrap().0,
-        page_count: pages_to_find
-    };
-
-    for i in 0..10 {
+    for i in 0..64 {
         log::info!("Loader memory map entry addr: {:#x}, page_count: {}, type: {:?}",
-            loader_memory_map[i].addr, loader_memory_map[i].page_count, loader_memory_map[i].ty);
+            MMAP_ARRAY[i].addr, MMAP_ARRAY[i].page_count, MMAP_ARRAY[i].ty);
     }
 
-    log::info!("Loader memory map entry addr: {:#x}, page_count: {}, type: {:?}",
-            loader_memory_map[memory_map.entries().len()].addr, loader_memory_map[memory_map.entries().len()].page_count, loader_memory_map[memory_map.entries().len()].ty);
-
-    Ok(shared_lib::allocator::Allocator::new(loader_memory_map, memory_map.entries().len() + 1))
+    let memory_map: MemoryMap = MemoryMap{ entries: &mut MMAP_ARRAY, next_free_entry_idx: (memory_map.entries().len()) as u64 };
+    Ok(shared_lib::allocator::Allocator::new(memory_map))
 }
 
 #[derive(Copy, Clone)]
@@ -375,8 +340,8 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
     let last_memory_region = memory_map.entries().last().unwrap();
     let last_frame_addr = last_memory_region.phys_start + (last_memory_region.page_count - 1) * 4096;
 
-    let mut allocator = init_allocator(memory_map)
-        .expect("Failed to create Allocator");
+    let mut allocator = unsafe { init_allocator(memory_map)
+        .expect("Failed to create Allocator") };
 
     // convert to and from raw ptr to bypass borrow checker
     let page_table = unsafe {
