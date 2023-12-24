@@ -19,6 +19,7 @@ pub struct MemoryRegion {
 }
 
 pub const MAX_MEMORY_MAP_SIZE: usize = 256;
+pub const MEMORY_MAP_PAGES: usize = 1 + (core::mem::size_of::<MemoryRegion>() * MAX_MEMORY_MAP_SIZE) / 4096;
 
 #[repr(C)]
 pub struct MemoryMap {
@@ -49,15 +50,13 @@ impl DerefMut for MemoryMap {
 
 #[repr(align(4096))]
 pub struct Allocator {
-    pub memory_map: MemoryMap,
-    next_free_frame: usize
+    pub memory_map: MemoryMap
 }
 
 impl Allocator {
     pub fn new(memory_map: MemoryMap) -> Self {
         Allocator {
-            memory_map,
-            next_free_frame: 0
+            memory_map
         }
     }
 

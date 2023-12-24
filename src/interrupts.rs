@@ -115,6 +115,12 @@ extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
 ) {
+    unsafe {
+        shared_lib::logger::LOGGER
+            .get()
+            .map(|l| l.force_unlock())
+    };
+
     log::info!("EXCEPTION: PAGE FAULT");
 
     let cr2: u64;

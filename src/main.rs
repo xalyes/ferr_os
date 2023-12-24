@@ -44,7 +44,7 @@ fn panic(info: &PanicInfo) -> ! {
 entry_point!(test_kernel_main);
 
 #[cfg(test)]
-fn test_kernel_main(_fb_info: &'static mut logger::FrameBufferInfo) -> ! {
+fn test_kernel_main(_boot_info: &'static mut shared_lib::BootInfo) -> ! {
     test_main();
     loop {}
 }
@@ -53,8 +53,11 @@ fn test_kernel_main(_fb_info: &'static mut logger::FrameBufferInfo) -> ! {
 entry_point!(kernel_main);
 
 #[cfg(not(test))]
-fn kernel_main(frame_buffer_info: &'static mut logger::FrameBufferInfo) -> ! {
-    let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(*frame_buffer_info));
+fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
+    let fb_info = boot_info.fb_info;
+    let memory_map = &boot_info.memory_map;
+
+    let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(fb_info));
     log::set_logger(logger).unwrap();
     log::set_max_level(log::LevelFilter::Trace);
 
@@ -71,6 +74,12 @@ fn kernel_main(frame_buffer_info: &'static mut logger::FrameBufferInfo) -> ! {
         if l4_table[i].is_present() {
             log::info!("L4 Entry {}: {:#x}", i, l4_table[i].addr());
         }
+    }
+
+    log::info!("MMap Entries addr: {:#x}", memory_map.entries as *const _ as u64);
+    log::info!("Memory map size: {}", memory_map.next_free_entry_idx - 1);
+    for i in 0..5 {
+        log::info!("Entry: addr: {:#x} pages: {}", memory_map.entries[i].addr, memory_map.entries[i].page_count);
     }
 
     log::info!("Everything is ok");

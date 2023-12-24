@@ -14,6 +14,13 @@ pub mod page_table;
 
 use core::arch::asm;
 use core::panic::PanicInfo;
+use crate::allocator::MemoryMap;
+use crate::logger::FrameBufferInfo;
+
+pub struct BootInfo {
+    pub fb_info: FrameBufferInfo,
+    pub memory_map: MemoryMap
+}
 
 pub const VIRT_MAPPING_OFFSET: u64 = 0x180_0000_0000;
 

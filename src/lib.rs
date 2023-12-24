@@ -37,11 +37,11 @@ fn panic(info: &PanicInfo) -> ! {
 macro_rules! entry_point {
     ($path:path) => {
         #[export_name = "_start"]
-        pub extern "C" fn __impl_start(fb_info: &'static mut shared_lib::logger::FrameBufferInfo) -> ! {
+        pub extern "C" fn __impl_start(boot_info: &'static mut shared_lib::BootInfo) -> ! {
             // validate the signature of the program entry point
-            let f: fn(&'static mut shared_lib::logger::FrameBufferInfo) -> ! = $path;
+            let f: fn(&'static mut shared_lib::BootInfo) -> ! = $path;
 
-            f(fb_info)
+            f(boot_info)
         }
     };
 }
@@ -50,7 +50,7 @@ macro_rules! entry_point {
 entry_point!(test_kernel_main);
 
 #[cfg(test)]
-fn test_kernel_main(_fb_info: &'static mut shared_lib::logger::FrameBufferInfo) -> ! {
+fn test_kernel_main(_fb_info: &'static mut shared_lib::BootInfo) -> ! {
     init();
     test_main();
     loop {
