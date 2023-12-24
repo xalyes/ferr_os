@@ -1,6 +1,7 @@
 use core::fmt;
 use core::fmt::Formatter;
 use core::ops::{Add, BitAnd};
+use crate::page_table::ENTRY_COUNT;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -51,6 +52,30 @@ impl VirtAddr {
     #[inline]
     pub const fn zero() -> VirtAddr {
         VirtAddr(0)
+    }
+
+    pub const fn p4_index(&self) -> u16 {
+        let idx = (self.0 >> 12 >> 9 >> 9 >> 9) as u16;
+        idx % ENTRY_COUNT
+    }
+
+    pub const fn p3_index(&self) -> u16 {
+        let idx = (self.0 >> 12 >> 9 >> 9) as u16;
+        idx % ENTRY_COUNT
+    }
+
+    pub const fn p2_index(&self) -> u16 {
+        let idx = (self.0 >> 12 >> 9) as u16;
+        idx % ENTRY_COUNT
+    }
+
+    pub const fn p1_index(&self) -> u16 {
+        let idx = (self.0 >> 12) as u16;
+        idx % ENTRY_COUNT
+    }
+
+    pub const fn get_page_offset(&self) -> u16 {
+        (self.0 & 0xfff) as u16
     }
 }
 

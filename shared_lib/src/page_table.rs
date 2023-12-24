@@ -145,43 +145,21 @@ impl core::ops::IndexMut<u16> for PageTable {
     }
 }
 
-unsafe fn create_next_table<'a>(page_table_entry: &'a mut PageTableEntry, page_tables_allocator: &'a mut impl PageTablesAllocator)
+unsafe fn create_next_table<'a>(page_table_entry: &'a mut PageTableEntry, page_tables_allocator: &'a mut impl PageTablesAllocator, offset: u64)
                                 -> Result::<&'a mut PageTable, &'static str> {
     if page_table_entry.flags().contains(PageTableFlags::PRESENT) {
-        let next_page_table = unsafe { &mut *(page_table_entry.addr() as *mut PageTable) };
+        let next_page_table = unsafe { &mut *((page_table_entry.addr() + offset) as *mut PageTable) };
         Ok(next_page_table)
     }
     else {
         let new_table = page_tables_allocator.allocate_page_table()?;
-        page_table_entry.set_addr(new_table as *const _ as u64, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
+        page_table_entry.set_addr((new_table as *const _ as u64 - offset), PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
         Ok(new_table)
     }
 }
 
-fn get_p4_index(virt: VirtAddr) -> u16 {
-    let idx = (virt.0 >> 12 >> 9 >> 9 >> 9) as u16;
-    idx % ENTRY_COUNT
-}
-
-fn get_p3_index(virt: VirtAddr) -> u16 {
-    let idx = (virt.0 >> 12 >> 9 >> 9) as u16;
-    idx % ENTRY_COUNT
-}
-
-fn get_p2_index(virt: VirtAddr) -> u16 {
-    let idx = (virt.0 >> 12 >> 9) as u16;
-    idx % ENTRY_COUNT
-}
-
-fn get_p1_index(virt: VirtAddr) -> u16 {
-    let idx = (virt.0 >> 12) as u16;
-    idx % ENTRY_COUNT
-}
-
 pub trait PageTablesAllocator {
     fn allocate_page_table(&mut self) -> Result::<&mut PageTable, &'static str>;
-
-    fn allocate(&mut self, count: usize) -> Result::<u64, &'static str>;
 }
 
 enum MappingMode {
@@ -189,7 +167,7 @@ enum MappingMode {
     Remapping
 }
 
-unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: VirtAddr, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator, mapping_mode: MappingMode)
+unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: VirtAddr, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator, mapping_mode: MappingMode, offset: u64)
                            -> core::result::Result<(), &'static str> {
     if virt.0 % 4096 != 0 {
         return Err("Virtual address must be aligned!");
@@ -202,18 +180,26 @@ unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: VirtAddr, phys: 
     log::trace!("Mapping {} -> {:#x}", virt, phys);
 
     let l3_page_table_entry = {
-        let l3_table = create_next_table(&mut l4_page_table[get_p4_index(virt)], page_tables_allocator)?;
-        l3_table.index_mut(get_p3_index(virt)) as *mut PageTableEntry
+        let l3_table = create_next_table(&mut l4_page_table[virt.p4_index()], page_tables_allocator, offset)?;
+        l3_table.index_mut(virt.p3_index()) as *mut PageTableEntry
     };
+
+    log::trace!("[mapper] got l3_page_table");
 
     let l2_page_table_entry = {
-        let l2_table = create_next_table(&mut *l3_page_table_entry, page_tables_allocator)?;
-        l2_table.index_mut(get_p2_index(virt)) as *mut PageTableEntry
+        let l2_table = create_next_table(&mut *l3_page_table_entry, page_tables_allocator, offset)?;
+        l2_table.index_mut(virt.p2_index()) as *mut PageTableEntry
     };
 
-    let l1_table = create_next_table(&mut *l2_page_table_entry, page_tables_allocator)?;
+    log::trace!("[mapper] got l2_page_table");
 
-    let l1_entry = &mut l1_table[get_p1_index(virt)];
+    let l1_table = create_next_table(&mut *l2_page_table_entry, page_tables_allocator, offset)?;
+
+    log::trace!("[mapper] got l1_page_table");
+
+    let l1_entry = &mut l1_table[virt.p1_index()];
+
+    log::trace!("[mapper] got l1_entry {:#x}", l1_entry as *const _ as u64);
     return if l1_entry.flags().contains(PageTableFlags::PRESENT) {
         if l1_entry.addr() == phys {
             log::info!("[mapper] addr {} already mapped to the same physical address. doing nothing.", virt);
@@ -237,34 +223,39 @@ unsafe fn map_address_impl(l4_page_table: &mut PageTable, virt: VirtAddr, phys: 
 
 pub unsafe fn map_address(l4_page_table: &mut PageTable, virt: VirtAddr, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
                           -> core::result::Result<(), &'static str> {
-    map_address_impl(l4_page_table, virt, phys, page_tables_allocator, MappingMode::CheckFrameIsFree)
+    map_address_impl(l4_page_table, virt, phys, page_tables_allocator, MappingMode::CheckFrameIsFree, 0)
 }
 
 pub unsafe fn remap_address(l4_page_table: &mut PageTable, virt: VirtAddr, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator)
                             -> core::result::Result<(), &'static str> {
-    map_address_impl(l4_page_table, virt, phys, page_tables_allocator, MappingMode::Remapping)
+    map_address_impl(l4_page_table, virt, phys, page_tables_allocator, MappingMode::Remapping, 0)
+}
+
+pub unsafe fn map_address_with_offset(l4_page_table: &mut PageTable, virt: VirtAddr, phys: u64, page_tables_allocator: &mut impl PageTablesAllocator, offset: u64)
+                          -> core::result::Result<(), &'static str> {
+    map_address_impl(l4_page_table, virt, phys, page_tables_allocator, MappingMode::CheckFrameIsFree, offset)
 }
 
 pub unsafe fn get_physical_address(l4_page_table: &PageTable, virt: VirtAddr) -> Option<u64> {
-    let l4_entry = l4_page_table[get_p4_index(virt)];
+    let l4_entry = l4_page_table[virt.p4_index()];
     if !l4_entry.flags().contains(PageTableFlags::PRESENT) {
         return None;
     }
 
     let l3_table = & *(l4_entry.addr() as *const PageTable);
-    let l3_entry = l3_table[get_p3_index(virt)];
+    let l3_entry = l3_table[virt.p3_index()];
     if !l3_entry.flags().contains(PageTableFlags::PRESENT) {
         return None;
     }
 
     let l2_table = & *(l3_entry.addr() as *const PageTable);
-    let l2_entry = l2_table[get_p2_index(virt)];
+    let l2_entry = l2_table[virt.p2_index()];
     if !l2_entry.flags().contains(PageTableFlags::PRESENT) {
         return None;
     }
 
     let l1_table = & *(l2_entry.addr() as *const PageTable);
-    let l1_entry = l1_table[get_p1_index(virt)];
+    let l1_entry = l1_table[virt.p1_index()];
     if !l1_entry.flags().contains(PageTableFlags::PRESENT) {
         return None;
     }
