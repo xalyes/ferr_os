@@ -14,7 +14,7 @@ pub struct VirtAddr(pub u64);
 impl VirtAddr {
     /// Create a new canonical virtual address.
     #[inline]
-    pub fn new(addr: u64) -> VirtAddr {
+    pub const fn new(addr: u64) -> VirtAddr {
         // By doing the right shift as a signed operation (on a i64), it will
         // sign extend the value, repeating the leftmost bit.
         VirtAddr(((addr << 16) as i64 >> 16) as u64)
@@ -27,7 +27,7 @@ impl VirtAddr {
     /// either a correct sign extension (i.e. copies of bit 47) or all null. Else, an error
     /// is returned.
     #[inline]
-    pub fn new_checked(addr: u64) -> Result<VirtAddr, &'static str> {
+    pub const fn new_checked(addr: u64) -> Result<VirtAddr, &'static str> {
         match addr & 0xffff_8000_0000_0000 {
             0 | 0xffff_8000_0000_0000 => Ok(VirtAddr(addr)),     // address is canonical
             0x0000_8000_0000_0000 => Ok(VirtAddr::new(addr)), // address needs sign extension
@@ -36,7 +36,7 @@ impl VirtAddr {
     }
 
     #[inline]
-    pub fn offset(&self, offset: u64) -> Result<VirtAddr, &'static str> {
+    pub const fn offset(&self, offset: u64) -> Result<VirtAddr, &'static str> {
         let (result, overflow) = self.0.overflowing_add(offset);
         if overflow {
             return Err("Virt addr overflow");

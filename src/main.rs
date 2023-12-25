@@ -4,16 +4,23 @@
 #![test_runner(shared_lib::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+extern crate alloc;
 extern crate shared_lib;
 
-use rust_os::entry_point;
-use rust_os::memory::{active_level_4_table, Allocator, translate_addr};
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+use alloc::vec;
+use alloc::vec::Vec;
+use rust_os::{allocator, entry_point};
+use rust_os::memory::{active_level_4_table, FrameAllocator, translate_addr};
+use rust_os::allocator::{HEAP_SIZE, init_heap};
 
 use core::panic::PanicInfo;
 use shared_lib::{logger, VIRT_MAPPING_OFFSET};
 
 #[cfg(not(test))]
 use core::arch::asm;
+use core::ops::Not;
 use shared_lib::addr::VirtAddr;
 use shared_lib::page_table::{map_address, map_address_with_offset};
 
@@ -72,49 +79,34 @@ fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
         active_level_4_table()
     };
 
-    for i in 0..512 {
-        if l4_table[i].is_present() {
-            log::info!("L4 Entry {}: {:#x}", i, l4_table[i].addr());
-        }
+    let mut allocator = FrameAllocator::new(memory_map);
+
+    init_heap(l4_table, &mut allocator)
+        .expect("Failed to init heap");
+
+    let heap_value_1 = Box::new(41);
+    let heap_value_2 = Box::new(13);
+    assert_eq!(*heap_value_1, 41);
+    assert_eq!(*heap_value_2, 13);
+
+    let n = 1000;
+    let mut vec = Vec::new();
+    for i in 0..n {
+        vec.push(i);
+    }
+    assert_eq!(vec.iter().sum::<u64>(), (n - 1) * n / 2);
+
+    for i in 0..HEAP_SIZE {
+        let x = Box::new(i);
+        assert_eq!(*x, i);
     }
 
-    let addresses = [
-        // framebuffer page
-        0x180_8000_0000,
-        // some code page
-        0x201008,
-        // some stack page
-        0x5_0000,
-        // virtual address mapped to physical address 0
-        VIRT_MAPPING_OFFSET,
-    ];
-
-    for &addr in &addresses {
-        let virt = VirtAddr::new_checked(addr).unwrap();
-        let phys = unsafe { translate_addr(virt) };
-
-        log::info!("{} -> {:#x}", virt, phys.unwrap());
+    let long_lived = Box::new(1); // new
+    for i in 0..HEAP_SIZE {
+        let x = Box::new(i);
+        assert_eq!(*x, i);
     }
-
-    let mut allocator = Allocator::new(memory_map);
-    let page = VirtAddr::new(0);
-    let frame = 0x_8000_0000;
-
-    unsafe {
-        map_address_with_offset(&mut l4_table, page, frame, &mut allocator, VIRT_MAPPING_OFFSET)
-            .expect("Failed to map");
-    }
-
-    log::info!("Mapped!");
-
-    unsafe {
-        log::info!("Translated {} -> {:#x}", VirtAddr::new(0xc80), translate_addr(VirtAddr::new(0xc80)).unwrap());
-    }
-
-    let page_ptr = page.0 as *mut u64;
-    unsafe {
-        page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e);
-    }
+    assert_eq!(*long_lived, 1); // new
 
     log::info!("Everything is ok");
 

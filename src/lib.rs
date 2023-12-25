@@ -4,7 +4,9 @@
 #![feature(abi_x86_interrupt)]
 #![test_runner(shared_lib::test_runner)]
 #![reexport_test_harness_main = "test_main"]
+#![feature(const_mut_refs)]
 
+extern crate alloc;
 use core::arch::asm;
 use core::panic::PanicInfo;
 use shared_lib::serial_println;
@@ -14,6 +16,7 @@ mod interrupts;
 pub mod gdt;
 mod pic;
 pub mod memory;
+pub mod allocator;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");

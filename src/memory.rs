@@ -56,14 +56,14 @@ fn translate_addr_inner(addr: VirtAddr) -> Option<u64> {
 }
 
 #[repr(align(4096))]
-pub struct Allocator {
+pub struct FrameAllocator {
     pub memory_map: &'static mut shared_lib::allocator::MemoryMap,
     next_free_frame: usize
 }
 
-impl Allocator {
+impl FrameAllocator {
     pub fn new(memory_map: &'static mut shared_lib::allocator::MemoryMap) -> Self {
-        Allocator {
+        FrameAllocator {
             memory_map,
             next_free_frame: 0,
         }
@@ -88,7 +88,7 @@ impl Allocator {
     }
 }
 
-impl PageTablesAllocator for Allocator {
+impl PageTablesAllocator for FrameAllocator {
     fn allocate_page_table(&mut self) -> Result::<&mut PageTable, &'static str> {
         let frame = self.allocate_frame().expect("Out of memory - failed to allocate frame");
 
