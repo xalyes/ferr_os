@@ -217,7 +217,7 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
 
                     log::debug!("[kernel map] .bss section: from {} to {}. size: {}", zero_start, zero_end, header.mem_size() - header.file_size());
 
-                    let data_bytes_before_zero = zero_start.0 & 0xfff;
+                    let mut data_bytes_before_zero = zero_start.0 & 0xfff;
 
                     if data_bytes_before_zero != 0 {
                         let frame = allocator.allocate(1).expect("Failed to allocate new frame");
@@ -244,6 +244,8 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                                 (4096 - data_bytes_before_zero) as usize,
                             );
                         }
+                    } else {
+                        data_bytes_before_zero = 4096;
                     }
 
                     if header.mem_size() - header.file_size() > (4096 - data_bytes_before_zero) {

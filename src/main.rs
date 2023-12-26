@@ -21,7 +21,6 @@ use shared_lib::{logger, VIRT_MAPPING_OFFSET};
 #[cfg(not(test))]
 use core::arch::asm;
 use core::ops::Not;
-use rust_os::task::simple_executor::SimpleExecutor;
 use rust_os::task::executor::Executor;
 use rust_os::task::{keyboard, Task};
 use shared_lib::addr::VirtAddr;
@@ -73,10 +72,10 @@ fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
     log::set_logger(logger).unwrap();
     log::set_max_level(log::LevelFilter::Debug);
 
-    shared_lib::serial_println!("Hello from kernel!");
-    log::info!("Hello from kernel!");
-
     rust_os::init();
+
+    log::info!("Hello from kernel!");
+    shared_lib::serial_println!("Hello from kernel!");
 
     let mut l4_table = unsafe {
         active_level_4_table()
@@ -90,6 +89,7 @@ fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
     let mut executor = Executor::new();
     executor.spawn(Task::new(example_task()));
     executor.spawn(Task::new(keyboard::print_keypresses()));
+
     executor.run();
 
     log::info!("Everything is ok");
