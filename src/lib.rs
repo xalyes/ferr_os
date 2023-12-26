@@ -17,6 +17,7 @@ pub mod gdt;
 mod pic;
 pub mod memory;
 pub mod allocator;
+pub mod task;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");

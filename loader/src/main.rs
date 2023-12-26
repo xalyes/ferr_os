@@ -192,7 +192,7 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                 let virt_start_addr = VirtAddr::new_checked(header.virtual_addr())
                     .expect("Got bad virtual address from ELF");
 
-                log::info!("[kernel map] segment: {}, phys_start: {:#x}, phys_end: {:#x}",
+                log::debug!("[kernel map] segment: {}, phys_start: {:#x}, phys_end: {:#x}",
                     virt_start_addr, phys_start_addr, phys_end_addr);
 
                 let virt_start_addr_aligned = align_down(virt_start_addr);
@@ -202,7 +202,7 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                     let virt = virt_start_addr_aligned.offset(i * 4096).unwrap();
                     let phys = phys_start_addr_aligned + i * 4096;
 
-                    log::info!("[kernel map] Mapping {} to {:#x}", virt, phys);
+                    log::debug!("[kernel map] Mapping {} to {:#x}", virt, phys);
                     unsafe {
                         map_address(page_table, virt, phys, allocator)
                             .expect("Failed to map kernel");
@@ -215,7 +215,7 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                     let zero_start = virt_start_addr.offset(header.file_size()).unwrap();
                     let zero_end = virt_start_addr.offset(header.mem_size()).unwrap();
 
-                    log::info!("[kernel map] .bss section: from {} to {}. size: {}", zero_start, zero_end, header.mem_size() - header.file_size());
+                    log::debug!("[kernel map] .bss section: from {} to {}. size: {}", zero_start, zero_end, header.mem_size() - header.file_size());
 
                     let data_bytes_before_zero = zero_start.0 & 0xfff;
 
@@ -225,13 +225,13 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                             let frame_to_copy = align_down_u64(phys_end_addr);
                             for i in 0..mapped_frames_counter {
                                 if mapped_frames[i].frame == frame_to_copy {
-                                    log::info!("[kernel map] Remapping {} to {:#x}", mapped_frames[i].page, frame);
+                                    log::debug!("[kernel map] Remapping {} to {:#x}", mapped_frames[i].page, frame);
                                     remap_address(page_table, mapped_frames[i].page, frame, allocator)
                                         .expect("Failed to map kernel");
                                 }
                             }
 
-                            log::info!("[kernel map] Copying from {:#x}", align_down_u64(phys_end_addr));
+                            log::debug!("[kernel map] Copying from {:#x}", align_down_u64(phys_end_addr));
                             core::ptr::copy(
                                 align_down_u64(phys_end_addr) as *const u8,
                                 frame as *mut _,
@@ -249,12 +249,12 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
                     if header.mem_size() - header.file_size() > (4096 - data_bytes_before_zero) {
                         let zero_start_aligned = zero_start.offset(4096 - data_bytes_before_zero).unwrap();
                         let bytes_to_allocate = header.mem_size() - header.file_size() - (4096 - data_bytes_before_zero);
-                        log::info!("[kernel map] bytes_to_allocate: {}", bytes_to_allocate);
+                        log::debug!("[kernel map] bytes_to_allocate: {}", bytes_to_allocate);
 
                         for i in 0..(1 + bytes_to_allocate / 4096) {
                             let frame = allocator.allocate(1).expect("Failed to allocate new frame");
                             let virt_ptr = zero_start_aligned.offset(i * 4096).unwrap();
-                            log::info!("[kernel map] Mapping {} to {:#x}", virt_ptr, frame);
+                            log::debug!("[kernel map] Mapping {} to {:#x}", virt_ptr, frame);
 
                             unsafe {
                                 map_address(page_table, virt_ptr, frame, allocator)

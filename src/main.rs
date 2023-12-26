@@ -21,6 +21,9 @@ use shared_lib::{logger, VIRT_MAPPING_OFFSET};
 #[cfg(not(test))]
 use core::arch::asm;
 use core::ops::Not;
+use rust_os::task::simple_executor::SimpleExecutor;
+use rust_os::task::executor::Executor;
+use rust_os::task::{keyboard, Task};
 use shared_lib::addr::VirtAddr;
 use shared_lib::page_table::{map_address, map_address_with_offset};
 
@@ -68,7 +71,7 @@ fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
 
     let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(fb_info));
     log::set_logger(logger).unwrap();
-    log::set_max_level(log::LevelFilter::Trace);
+    log::set_max_level(log::LevelFilter::Debug);
 
     shared_lib::serial_println!("Hello from kernel!");
     log::info!("Hello from kernel!");
@@ -84,29 +87,10 @@ fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
     init_heap(l4_table, &mut allocator)
         .expect("Failed to init heap");
 
-    let heap_value_1 = Box::new(41);
-    let heap_value_2 = Box::new(13);
-    assert_eq!(*heap_value_1, 41);
-    assert_eq!(*heap_value_2, 13);
-
-    let n = 1000;
-    let mut vec = Vec::new();
-    for i in 0..n {
-        vec.push(i);
-    }
-    assert_eq!(vec.iter().sum::<u64>(), (n - 1) * n / 2);
-
-    for i in 0..HEAP_SIZE {
-        let x = Box::new(i);
-        assert_eq!(*x, i);
-    }
-
-    let long_lived = Box::new(1); // new
-    for i in 0..HEAP_SIZE {
-        let x = Box::new(i);
-        assert_eq!(*x, i);
-    }
-    assert_eq!(*long_lived, 1); // new
+    let mut executor = Executor::new();
+    executor.spawn(Task::new(example_task()));
+    executor.spawn(Task::new(keyboard::print_keypresses()));
+    executor.run();
 
     log::info!("Everything is ok");
 
@@ -115,4 +99,13 @@ fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
             asm!("hlt", options(nomem, nostack, preserves_flags));
         }
     }
+}
+
+async fn async_number() -> u32 {
+    42
+}
+
+async fn example_task() {
+    let number = async_number().await;
+    log::info!("async number: {}", number);
 }
