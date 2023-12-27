@@ -21,10 +21,3 @@ version = "0.3.1"
 default-features = false
 features = ["unicode"]
 optional = false
-
-[package.metadata.bootimage]
-test-args = [
-    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-serial", "stdio", "-display", "none"
-]
-test-timeout = 300          # (in seconds)
-test-success-exit-code = 33 # (0x10 << 1) | 1

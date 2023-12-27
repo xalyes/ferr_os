@@ -5,6 +5,10 @@ use crossbeam_queue::ArrayQueue;
 use core::task::{Context, Poll};
 use alloc::task::Wake;
 use core::arch::asm;
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering::Relaxed;
+
+pub static STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct Executor {
     tasks: BTreeMap<TaskId, Task>,
@@ -50,8 +54,8 @@ impl Executor {
         }
     }
 
-    pub fn run(&mut self) -> ! {
-        loop {
+    pub fn run(&mut self) {
+        while !STOP.load(Relaxed) {
             self.run_ready_tasks();
             self.sleep_if_idle();
         }

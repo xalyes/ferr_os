@@ -56,11 +56,20 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     init_heap(l4_table, &mut allocator)
         .expect("Failed to init heap");
 
-    let mut executor = Executor::new();
+    let mut executor: Executor = Executor::new();
     executor.spawn(Task::new(ok_task()));
     executor.spawn(Task::new(keyboard::print_keypresses()));
 
     executor.run();
+
+    // todo ACPI shutdown
+    log::info!("exited");
+
+    loop {
+        unsafe {
+            asm!("cli; hlt", options(nomem, nostack, preserves_flags));
+        }
+    }
 }
 
 async fn async_number() -> u32 {
