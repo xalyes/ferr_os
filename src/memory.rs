@@ -2,6 +2,7 @@ use core::arch::asm;
 use shared_lib::addr::VirtAddr;
 use shared_lib::page_table::{PageTable, PageTablesAllocator};
 use shared_lib::VIRT_MAPPING_OFFSET;
+use shared_lib::frame_allocator::{MemoryMap, MemoryType};
 
 pub unsafe fn active_level_4_table() -> &'static mut shared_lib::page_table::PageTable
 {
@@ -52,12 +53,12 @@ fn translate_addr_inner(addr: VirtAddr) -> Option<u64> {
 
 #[repr(align(4096))]
 pub struct FrameAllocator {
-    pub memory_map: &'static mut shared_lib::allocator::MemoryMap,
+    pub memory_map: &'static MemoryMap,
     next_free_frame: usize
 }
 
 impl FrameAllocator {
-    pub fn new(memory_map: &'static mut shared_lib::allocator::MemoryMap) -> Self {
+    pub fn new(memory_map: &'static MemoryMap) -> Self {
         FrameAllocator {
             memory_map,
             next_free_frame: 0,
@@ -67,7 +68,7 @@ impl FrameAllocator {
     fn usable_frames(&self) -> impl Iterator<Item = u64> + '_ {
         // get usable regions from memory map
         let regions = self.memory_map.iter();
-        let usable_regions = regions.filter(|r| r.ty == shared_lib::allocator::MemoryType::Free);
+        let usable_regions = regions.filter(|r| r.ty == MemoryType::Free);
 
         // map each region to its address range
         let addr_ranges = usable_regions.map(|r| r.addr..(r.addr + 4096 * r.page_count as u64));

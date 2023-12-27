@@ -34,9 +34,9 @@ fn panic(info: &PanicInfo) -> ! {
 
 entry_point!(kernel_main);
 
-fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
+fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     let fb_info = boot_info.fb_info;
-    let memory_map = &mut boot_info.memory_map;
+    let memory_map = &boot_info.memory_map;
 
     let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(fb_info));
     log::set_logger(logger).unwrap();

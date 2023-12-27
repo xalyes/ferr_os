@@ -5,16 +5,16 @@
 #![reexport_test_harness_main = "test_main"]
 
 pub mod logger;
-pub mod allocator;
 pub mod bits;
 pub mod interrupts;
 pub mod serial;
 pub mod addr;
 pub mod page_table;
+pub mod frame_allocator;
 
 use core::arch::asm;
 use core::panic::PanicInfo;
-use crate::allocator::MemoryMap;
+use crate::frame_allocator::MemoryMap;
 use crate::logger::FrameBufferInfo;
 
 pub struct BootInfo {
@@ -81,9 +81,9 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 macro_rules! entry_point {
     ($path:path) => {
         #[export_name = "_start"]
-        pub extern "C" fn __impl_start(boot_info: &'static mut BootInfo) -> ! {
+        pub extern "C" fn __impl_start(boot_info: &'static BootInfo) -> ! {
             // validate the signature of the program entry point
-            let f: fn(&'static mut BootInfo) -> ! = $path;
+            let f: fn(&'static BootInfo) -> ! = $path;
 
             f(boot_info)
         }
@@ -95,7 +95,7 @@ entry_point!(test_kernel_main);
 
 /// Entry point for `cargo test`
 #[cfg(test)]
-fn test_kernel_main(_boot_info: &'static mut BootInfo) -> ! {
+fn test_kernel_main(_boot_info: &'static BootInfo) -> ! {
     //init();
     test_main();
     loop {}

@@ -15,7 +15,7 @@ use rust_os::memory::active_level_4_table;
 
 entry_point!(main);
 
-fn main(boot_info: &'static mut BootInfo) -> ! {
+fn main(boot_info: &'static BootInfo) -> ! {
     use rust_os::memory::FrameAllocator;
 
     rust_os::init();
@@ -23,7 +23,7 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
         active_level_4_table()
     };
 
-    let mut allocator = FrameAllocator::new(&mut boot_info.memory_map);
+    let mut allocator = FrameAllocator::new(&boot_info.memory_map);
 
     init_heap(l4_table, &mut allocator)
         .expect("Failed to init heap");

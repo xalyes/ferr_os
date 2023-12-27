@@ -21,7 +21,7 @@ use shared_lib::addr::{PhysAddr, VirtAddr};
 use shared_lib::logger::FrameBufferInfo;
 use shared_lib::page_table::{PageTable, PageTablesAllocator, map_address, remap_address, align_down, align_down_u64};
 use shared_lib::{BootInfo, logger, VIRT_MAPPING_OFFSET};
-use shared_lib::allocator::{MemoryRegion, Allocator, MemoryMap, MAX_MEMORY_MAP_SIZE, MEMORY_MAP_PAGES};
+use shared_lib::frame_allocator::{MemoryRegion, Allocator, MemoryMap, MAX_MEMORY_MAP_SIZE, MEMORY_MAP_PAGES};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -38,21 +38,21 @@ fn panic(info: &PanicInfo) -> ! {
     }
 }
 
-fn convert_memory_type(t: MemoryType) -> shared_lib::allocator::MemoryType {
+fn convert_memory_type(t: MemoryType) -> shared_lib::frame_allocator::MemoryType {
     match t {
         MemoryType::MMIO_PORT_SPACE | MemoryType::MMIO
-        | MemoryType::RESERVED | MemoryType::UNUSABLE => shared_lib::allocator::MemoryType::Reserved,
+        | MemoryType::RESERVED | MemoryType::UNUSABLE => shared_lib::frame_allocator::MemoryType::Reserved,
 
         MemoryType::PERSISTENT_MEMORY | MemoryType::CONVENTIONAL
         | MemoryType::LOADER_DATA | MemoryType::LOADER_CODE
-        | MemoryType::BOOT_SERVICES_CODE | MemoryType::BOOT_SERVICES_DATA => shared_lib::allocator::MemoryType::Free,
+        | MemoryType::BOOT_SERVICES_CODE | MemoryType::BOOT_SERVICES_DATA => shared_lib::frame_allocator::MemoryType::Free,
 
         MemoryType::ACPI_NON_VOLATILE | MemoryType::RUNTIME_SERVICES_CODE
-        | MemoryType::RUNTIME_SERVICES_DATA => shared_lib::allocator::MemoryType::Acpi1_3,
+        | MemoryType::RUNTIME_SERVICES_DATA => shared_lib::frame_allocator::MemoryType::Acpi1_3,
 
-        MemoryType::ACPI_RECLAIM => shared_lib::allocator::MemoryType::AcpiReclaim,
+        MemoryType::ACPI_RECLAIM => shared_lib::frame_allocator::MemoryType::AcpiReclaim,
 
-        MemoryType::PAL_CODE => shared_lib::allocator::MemoryType::Acpi1_4,
+        MemoryType::PAL_CODE => shared_lib::frame_allocator::MemoryType::Acpi1_4,
 
         _ => panic!("Unexpected memory type")
     }
@@ -142,21 +142,21 @@ fn load_kernel(image: uefi::Handle, system_table: &mut uefi::table::SystemTable<
 }
 
 unsafe fn init_allocator(memory_map: uefi::table::boot::MemoryMap)
-                         -> Result<shared_lib::allocator::Allocator, &'static str> {
-    static mut MMAP_ARRAY: [MemoryRegion; shared_lib::allocator::MAX_MEMORY_MAP_SIZE]
-        = [MemoryRegion{ ty: shared_lib::allocator::MemoryType::Reserved, addr: 0, page_count: 0 }; shared_lib::allocator::MAX_MEMORY_MAP_SIZE];
+                         -> Result<Allocator, &'static str> {
+    static mut MMAP_ARRAY: [MemoryRegion; MAX_MEMORY_MAP_SIZE]
+        = [MemoryRegion{ ty: shared_lib::frame_allocator::MemoryType::Reserved, addr: 0, page_count: 0 }; MAX_MEMORY_MAP_SIZE];
 
     for (idx, memory_descriptor) in memory_map.entries().enumerate() {
         if memory_descriptor.phys_start == 0 {
-            MMAP_ARRAY[idx] = shared_lib::allocator::MemoryRegion {
-                ty: shared_lib::allocator::MemoryType::Reserved,
+            MMAP_ARRAY[idx] = MemoryRegion {
+                ty: shared_lib::frame_allocator::MemoryType::Reserved,
                 addr: memory_descriptor.phys_start,
                 page_count: memory_descriptor.page_count as usize
             };
             continue;
         }
 
-        MMAP_ARRAY[idx] = shared_lib::allocator::MemoryRegion {
+        MMAP_ARRAY[idx] = MemoryRegion {
             ty: convert_memory_type(memory_descriptor.ty),
             addr: memory_descriptor.phys_start,
             page_count: memory_descriptor.page_count as usize
@@ -169,7 +169,7 @@ unsafe fn init_allocator(memory_map: uefi::table::boot::MemoryMap)
     }
 
     let memory_map: MemoryMap = MemoryMap{ entries: &mut MMAP_ARRAY, next_free_entry_idx: (memory_map.entries().len()) as u64 };
-    Ok(shared_lib::allocator::Allocator::new(memory_map))
+    Ok(shared_lib::frame_allocator::Allocator::new(memory_map))
 }
 
 #[derive(Copy, Clone)]
@@ -426,7 +426,7 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
     log::info!("FB info: {:#x}", &framebuffer as *const _ as u64);
 
     static mut DUMMY_MMAP_ARRAY: [MemoryRegion; MAX_MEMORY_MAP_SIZE] = [
-        MemoryRegion{ ty: shared_lib::allocator::MemoryType::Reserved, addr: 0, page_count: 0 };
+        MemoryRegion{ ty: shared_lib::frame_allocator::MemoryType::Reserved, addr: 0, page_count: 0 };
         MAX_MEMORY_MAP_SIZE
     ];
 
