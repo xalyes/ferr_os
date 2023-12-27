@@ -384,7 +384,6 @@ impl InterruptDescriptorTable {
         unsafe { self.load_unsafe() }
     }
 
-
     #[inline]
     pub unsafe fn load_unsafe(&self) {
         unsafe {

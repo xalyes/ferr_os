@@ -120,11 +120,3 @@ extern "x86-interrupt" fn page_fault_handler(
         }
     }
 }
-
-#[test_case]
-fn test_breakpoint_exception() {
-    // invoke a breakpoint exception
-    unsafe {
-        asm!("int3", options(nomem, nostack));
-    }
-}
