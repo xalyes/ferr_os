@@ -1,32 +1,20 @@
 #![no_std]
 #![no_main]
-#![feature(custom_test_frameworks)]
-#![test_runner(shared_lib::test_runner)]
-#![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
 extern crate shared_lib;
 
-use alloc::boxed::Box;
-use alloc::rc::Rc;
-use alloc::vec;
-use alloc::vec::Vec;
-use rust_os::{allocator, entry_point};
+use shared_lib::BootInfo;
+use shared_lib::entry_point;
 use rust_os::memory::{active_level_4_table, FrameAllocator, translate_addr};
-use rust_os::allocator::{HEAP_SIZE, init_heap};
+use rust_os::allocator::init_heap;
 
 use core::panic::PanicInfo;
-use shared_lib::{logger, VIRT_MAPPING_OFFSET};
-
-#[cfg(not(test))]
+use shared_lib::logger;
 use core::arch::asm;
-use core::ops::Not;
 use rust_os::task::executor::Executor;
 use rust_os::task::{keyboard, Task};
-use shared_lib::addr::VirtAddr;
-use shared_lib::page_table::{map_address, map_address_with_offset};
 
-#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
@@ -44,26 +32,8 @@ fn panic(info: &PanicInfo) -> ! {
     }
 }
 
-// our panic handler in test mode
-#[cfg(test)]
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    rust_os::test_panic_handler(info);
-}
-
-#[cfg(test)]
-entry_point!(test_kernel_main);
-
-#[cfg(test)]
-fn test_kernel_main(_boot_info: &'static mut shared_lib::BootInfo) -> ! {
-    test_main();
-    loop {}
-}
-
-#[cfg(not(test))]
 entry_point!(kernel_main);
 
-#[cfg(not(test))]
 fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
     let fb_info = boot_info.fb_info;
     let memory_map = &mut boot_info.memory_map;

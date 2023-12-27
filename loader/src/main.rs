@@ -187,27 +187,40 @@ fn map_kernel(elf_file: &ElfFile, kernel: u64, page_table: &mut PageTable, alloc
         match header.get_type().unwrap() {
             program::Type::Load => {
                 let phys_start_addr = (kernel as u64) + header.offset();
-                let phys_end_addr = phys_start_addr + header.file_size() - 1;
+                let phys_end_addr = phys_start_addr + header.file_size();
 
                 let virt_start_addr = VirtAddr::new_checked(header.virtual_addr())
                     .expect("Got bad virtual address from ELF");
 
-                log::debug!("[kernel map] segment: {}, phys_start: {:#x}, phys_end: {:#x}",
-                    virt_start_addr, phys_start_addr, phys_end_addr);
+                log::debug!("[kernel map] segment: {}, phys_start: {:#x}, phys_end: {:#x}. header file size: {}",
+                    virt_start_addr, phys_start_addr, phys_end_addr, header.file_size());
 
-                let virt_start_addr_aligned = align_down(virt_start_addr);
-                let phys_start_addr_aligned = align_down_u64(phys_start_addr);
+                if header.file_size() != 0 {
+                    let virt_start_addr_aligned = align_down(virt_start_addr);
+                    let phys_start_addr_aligned = align_down_u64(phys_start_addr);
 
-                for i in 0..(1 + (header.file_size() - 1 + virt_start_addr.0 - virt_start_addr_aligned.0) / 4096) {
-                    let virt = virt_start_addr_aligned.offset(i * 4096).unwrap();
-                    let phys = phys_start_addr_aligned + i * 4096;
+                    for i in 0..(1 + (header.file_size() - 1 + virt_start_addr.0 - virt_start_addr_aligned.0) / 4096) {
+                        let virt = virt_start_addr_aligned.offset(i * 4096).unwrap();
+                        let phys = phys_start_addr_aligned + i * 4096;
 
-                    log::debug!("[kernel map] Mapping {} to {:#x}", virt, phys);
+                        log::debug!("[kernel map] Mapping {} to {:#x}", virt, phys);
+                        unsafe {
+                            map_address(page_table, virt, phys, allocator)
+                                .expect("Failed to map kernel");
+                        }
+                        mapped_frames[mapped_frames_counter] = MappedEntry { page: virt, frame: phys };
+                        mapped_frames_counter += 1;
+                    }
+                } else {
+                    let virt_start_addr_aligned = align_down(virt_start_addr);
+                    let phys_start_addr_aligned = align_down_u64(phys_start_addr);
+
+                    log::debug!("[kernel map] Mapping {} to {:#x}", virt_start_addr_aligned, phys_start_addr_aligned);
                     unsafe {
-                        map_address(page_table, virt, phys, allocator)
+                        map_address(page_table, virt_start_addr_aligned, phys_start_addr_aligned, allocator)
                             .expect("Failed to map kernel");
                     }
-                    mapped_frames[mapped_frames_counter] = MappedEntry{ page: virt, frame: phys };
+                    mapped_frames[mapped_frames_counter] = MappedEntry { page: virt_start_addr_aligned, frame: phys_start_addr_aligned };
                     mapped_frames_counter += 1;
                 }
 

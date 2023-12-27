@@ -10,6 +10,8 @@ extern crate alloc;
 use core::arch::asm;
 use core::panic::PanicInfo;
 use shared_lib::serial_println;
+use shared_lib::entry_point;
+use shared_lib::BootInfo;
 
 pub mod idt;
 mod interrupts;
@@ -35,19 +37,6 @@ pub fn test_panic_handler(info: &PanicInfo) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     test_panic_handler(info)
-}
-
-#[macro_export]
-macro_rules! entry_point {
-    ($path:path) => {
-        #[export_name = "_start"]
-        pub extern "C" fn __impl_start(boot_info: &'static mut shared_lib::BootInfo) -> ! {
-            // validate the signature of the program entry point
-            let f: fn(&'static mut shared_lib::BootInfo) -> ! = $path;
-
-            f(boot_info)
-        }
-    };
 }
 
 #[cfg(test)]

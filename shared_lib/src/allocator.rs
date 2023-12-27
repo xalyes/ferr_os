@@ -117,7 +117,7 @@ impl PageTablesAllocator for Allocator {
                         memory_map.next_free_entry_idx += 1;
                         new_region_addr
                     };
-                    log::debug!("Allocated page table. Addr: {:#x}", addr);
+                    log::trace!("Allocated page table. Addr: {:#x}", addr);
                     let page_table = unsafe { core::slice::from_raw_parts_mut(addr as *mut PageTable, 4096) };
                     page_table[0].clear();
                     return Ok(&mut page_table[0]);
