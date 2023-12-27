@@ -19,7 +19,8 @@ use crate::logger::FrameBufferInfo;
 
 pub struct BootInfo {
     pub fb_info: FrameBufferInfo,
-    pub memory_map: MemoryMap
+    pub memory_map: MemoryMap,
+    pub memory_map_next_free_frame: usize
 }
 
 pub const VIRT_MAPPING_OFFSET: u64 = 0x180_0000_0000;

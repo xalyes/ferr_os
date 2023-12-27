@@ -4,9 +4,9 @@
 extern crate alloc;
 extern crate shared_lib;
 
-use shared_lib::BootInfo;
+use shared_lib::{BootInfo, VIRT_MAPPING_OFFSET};
 use shared_lib::entry_point;
-use rust_os::memory::{active_level_4_table, FrameAllocator};
+use rust_os::memory::{active_level_4_table};
 use rust_os::allocator::init_heap;
 
 use core::panic::PanicInfo;
@@ -51,7 +51,7 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
         active_level_4_table()
     };
 
-    let mut allocator = FrameAllocator::new(memory_map);
+    let mut allocator = shared_lib::frame_allocator::FrameAllocator::new(memory_map, VIRT_MAPPING_OFFSET, boot_info.memory_map_next_free_frame);
 
     init_heap(l4_table, &mut allocator)
         .expect("Failed to init heap");

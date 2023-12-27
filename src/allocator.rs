@@ -4,7 +4,7 @@ use shared_lib::addr::VirtAddr;
 use shared_lib::page_table::{map_address_with_offset, PageTable};
 use shared_lib::VIRT_MAPPING_OFFSET;
 use crate::allocator::fixed_size_block::FixedSizeBlockAllocator;
-use crate::memory::FrameAllocator;
+use shared_lib::frame_allocator::FrameAllocator;
 
 pub struct Locked<A> {
     inner: spin::Mutex<A>

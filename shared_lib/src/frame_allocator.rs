@@ -1,4 +1,5 @@
 use core::ops::{Deref, DerefMut};
+use crate::addr::VirtAddr;
 use crate::page_table::{PageTable, PageTablesAllocator};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -22,8 +23,9 @@ pub const MAX_MEMORY_MAP_SIZE: usize = 256;
 pub const MEMORY_MAP_PAGES: usize = 1 + (core::mem::size_of::<MemoryRegion>() * MAX_MEMORY_MAP_SIZE) / 4096;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct MemoryMap {
-    pub entries: &'static mut [MemoryRegion; MAX_MEMORY_MAP_SIZE],
+    pub entries: [MemoryRegion; MAX_MEMORY_MAP_SIZE],
     pub next_free_entry_idx: u64
 }
 
@@ -49,80 +51,50 @@ impl DerefMut for MemoryMap {
 }
 
 #[repr(align(4096))]
-pub struct Allocator {
-    pub memory_map: MemoryMap
+pub struct FrameAllocator {
+    memory_map: &'static MemoryMap,
+    pub next: usize,
+    mapping_offset: u64
 }
 
-impl Allocator {
-    pub fn new(memory_map: MemoryMap) -> Self {
-        Allocator {
-            memory_map
+impl FrameAllocator {
+    pub fn new(memory_map: &'static MemoryMap, mapping_offset: u64, next_free_frame: usize) -> Self {
+        FrameAllocator {
+            memory_map,
+            next: next_free_frame,
+            mapping_offset
         }
     }
 
-    pub fn allocate(&mut self, count: usize) -> Result<u64, &'static str> {
-        let memory_map = &mut self.memory_map;
+    fn usable_frames(&self) -> impl Iterator<Item = u64> + '_ {
+        // get usable regions from memory map
+        let regions = self.memory_map.iter();
+        let usable_regions = regions.filter(|r| r.ty == MemoryType::Free);
 
-        for region in memory_map.iter_mut() {
-            match &region.ty {
-                MemoryType::Free => {
-                    if region.page_count < count {
-                        continue;
-                    }
+        // map each region to its address range
+        let addr_ranges = usable_regions.map(|r| r.addr..(r.addr + 4096 * r.page_count as u64));
 
-                    let addr = if region.page_count == count {
-                        region.ty = MemoryType::InUse;
-                        region.addr
-                    } else {
-                        region.page_count -= count;
-                        let new_region_addr = region.addr + (region.page_count * 4096) as u64;
-                        memory_map.entries[memory_map.next_free_entry_idx as usize] = MemoryRegion {
-                            ty: MemoryType::InUse,
-                            addr: new_region_addr,
-                            page_count: count
-                        };
-                        memory_map.next_free_entry_idx += 1;
-                        new_region_addr
-                    };
-                    log::info!("Allocated region for {} pages. Addr: {:#x}", count, addr);
-                    return Ok(addr);
-                }
-                _other => {}
-            }
-        }
-        Err("Out of memory!")
+        // transform to an iterator of frame start addresses
+        addr_ranges.flat_map(|r| r.step_by(4096))
+    }
+
+    pub fn allocate_frame(&mut self) -> Option<u64> {
+        let frame = self.usable_frames().nth(self.next);
+        self.next += 1;
+        frame
     }
 }
 
-impl PageTablesAllocator for Allocator {
+impl PageTablesAllocator for FrameAllocator {
     fn allocate_page_table(&mut self) -> Result::<&mut PageTable, &'static str> {
-        let memory_map = &mut self.memory_map;
+        let frame = self.allocate_frame().expect("Out of memory - failed to allocate frame");
 
-        for region in memory_map.iter_mut() {
-            match &region.ty {
-                MemoryType::Free => {
-                    let addr = if region.page_count == 1 {
-                        region.ty = MemoryType::InUse;
-                        region.addr
-                    } else {
-                        region.page_count -= 1;
-                        let new_region_addr = region.addr + (region.page_count * 4096) as u64;
-                        memory_map.entries[memory_map.next_free_entry_idx as usize] = MemoryRegion {
-                            ty: MemoryType::InUse,
-                            addr: new_region_addr,
-                            page_count: 1
-                        };
-                        memory_map.next_free_entry_idx += 1;
-                        new_region_addr
-                    };
-                    log::trace!("Allocated page table. Addr: {:#x}", addr);
-                    let page_table = unsafe { core::slice::from_raw_parts_mut(addr as *mut PageTable, 4096) };
-                    page_table[0].clear();
-                    return Ok(&mut page_table[0]);
-                }
-                _other => {}
-            }
-        }
-        Err("Out of memory!")
+        log::info!("Allocated page table. Addr: {:#x}", frame);
+        let page = VirtAddr::new_checked(frame + self.mapping_offset)
+            .expect("Failed to create virt address");
+
+        let page_table = unsafe { core::slice::from_raw_parts_mut(page.0 as *mut PageTable, 4096) };
+        page_table[0].clear();
+        Ok(&mut page_table[0])
     }
 }
