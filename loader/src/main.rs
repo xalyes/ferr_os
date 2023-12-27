@@ -7,6 +7,21 @@ extern crate shared_lib;
 use core::panic::PanicInfo;
 use core::arch::asm;
 use core::slice::{ from_raw_parts_mut, from_raw_parts };
+use uefi::prelude::entry;
+use uefi::proto::media::file::File;
+use uefi::table::boot::{OpenProtocolAttributes, OpenProtocolParams, AllocateType, MemoryType};
+use uefi::proto::media::{
+    file::{FileMode, FileAttribute, RegularFile},
+    fs::SimpleFileSystem
+};
+use uefi::data_types::CStr16;
+use uefi::proto::console::gop::GraphicsOutput;
+use xmas_elf::{ElfFile, header, program};
+use shared_lib::addr::{PhysAddr, VirtAddr};
+use shared_lib::logger::FrameBufferInfo;
+use shared_lib::page_table::{PageTable, PageTablesAllocator, map_address, remap_address, align_down, align_down_u64};
+use shared_lib::{BootInfo, logger, VIRT_MAPPING_OFFSET};
+use shared_lib::allocator::{MemoryRegion, Allocator, MemoryMap, MAX_MEMORY_MAP_SIZE, MEMORY_MAP_PAGES};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -22,22 +37,6 @@ fn panic(info: &PanicInfo) -> ! {
         unsafe { asm!("cli; hlt") };
     }
 }
-
-use uefi::prelude::entry;
-use uefi::proto::media::file::File;
-use uefi::table::boot::{OpenProtocolAttributes, OpenProtocolParams, AllocateType, MemoryType};
-use uefi::proto::media::{
-    file::{FileMode, FileAttribute, RegularFile},
-    fs::SimpleFileSystem
-};
-use uefi::data_types::CStr16;
-use uefi::proto::console::gop::GraphicsOutput;
-use xmas_elf::{ElfFile, header, program};
-use shared_lib::addr::VirtAddr;
-use shared_lib::logger::FrameBufferInfo;
-use shared_lib::page_table::{PageTable, PageTablesAllocator, map_address, remap_address, align_down, align_down_u64, PageTableFlags, get_physical_address};
-use shared_lib::{BootInfo, logger, VIRT_MAPPING_OFFSET};
-use shared_lib::allocator::{MemoryRegion, Allocator, MemoryMap, MAX_MEMORY_MAP_SIZE, MEMORY_MAP_PAGES};
 
 fn convert_memory_type(t: MemoryType) -> shared_lib::allocator::MemoryType {
     match t {
@@ -323,14 +322,68 @@ fn create_stack(stack_depth: usize, page_table: &mut PageTable, allocator: &mut 
     Ok(stack_addr + (stack_depth as u64 - 1) * 4096)
 }
 
-#[entry]
-fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi::table::Boot>) -> uefi::Status {
-    let mut framebuffer = init_framebuffer(image, &mut system_table)
+fn setup_mappings(last_frame_addr: PhysAddr, page_table: &mut PageTable, allocator: &mut Allocator, kernel: *const u8, kernel_size: usize, framebuffer: &FrameBufferInfo) -> VirtAddr {
+    let elf_file = ElfFile::new(unsafe { from_raw_parts(kernel, kernel_size) }).unwrap();
+    header::sanity_check(&elf_file).expect("Failed to parse kernel file. Expected ELF");
+
+    log::info!("Mapping all memory. Last frame: {:#x}", last_frame_addr.0);
+
+    for i in 0..(last_frame_addr.0 / 4096) {
+        let phys =  i * 4096;
+        let virt = VirtAddr::new(phys + VIRT_MAPPING_OFFSET);
+
+        unsafe {
+            map_address(page_table, virt, phys, allocator)
+                .expect("Failed to map memory");
+        }
+    }
+
+    map_kernel(&elf_file, kernel as u64, page_table, allocator)
+        .expect("Failed to map kernel");
+
+    map_framebuffer(&framebuffer, page_table, allocator)
+        .expect("Failed to map framebuffer");
+
+    unsafe {
+        let ctx_switch_ptr = context_switch as *const () as u64;
+        map_address(page_table, align_down(VirtAddr::new_checked(ctx_switch_ptr).unwrap()), align_down_u64(ctx_switch_ptr), allocator)
+            .expect("Failed to map context switch function");
+    }
+
+    VirtAddr::new_checked(elf_file.header.pt2.entry_point()).unwrap()
+}
+
+fn init_logger(image: uefi::Handle, system_table: &mut uefi::table::SystemTable<uefi::table::Boot>) -> FrameBufferInfo {
+    let framebuffer = init_framebuffer(image, system_table)
         .expect("Failed to init framebuffer");
 
     let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(framebuffer));
     log::set_logger(logger).unwrap();
     log::set_max_level(log::LevelFilter::Info);
+    framebuffer
+}
+
+fn map_bootinfo(boot_info: &mut BootInfo, page_table: &mut PageTable, allocator: &mut Allocator) {
+    let boot_info_ptr = boot_info as *const _ as u64;
+    log::info!("Mapping boot info. addr: {:#x}", boot_info_ptr);
+
+    unsafe {
+        map_address(page_table, align_down(VirtAddr::new_checked(boot_info_ptr).unwrap()), align_down_u64(boot_info_ptr), allocator)
+            .expect("Failed to map boot info");
+    }
+
+    for i in 0..=MEMORY_MAP_PAGES {
+        let ptr = align_down_u64(allocator.memory_map.entries as *const _ as u64) + i as u64 * 4096;
+        unsafe {
+            map_address(page_table, VirtAddr::new_checked(ptr).unwrap(), ptr, allocator)
+                .expect("Failed to map boot info");
+        }
+    }
+}
+
+#[entry]
+fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi::table::Boot>) -> uefi::Status {
+    let mut framebuffer = init_logger(image, &mut system_table);
 
     log::info!("This is a very simple UEFI bootloader");
 
@@ -338,17 +391,16 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
     let kernel = load_kernel(image, &mut system_table, kernel_max_size)
         .expect("Failed to load kernel");
 
-    let elf_file = ElfFile::new(unsafe { from_raw_parts(kernel, kernel_max_size) }).unwrap();
-    header::sanity_check(&elf_file).expect("Failed to parse kernel file. Expected ELF");
-
     log::info!("Exiting boot services...");
     let (_runtime_system_table, memory_map) = system_table.exit_boot_services(MemoryType::LOADER_DATA);
 
     let last_memory_region = memory_map.entries().last().unwrap();
     let last_frame_addr = last_memory_region.phys_start + (last_memory_region.page_count - 1) * 4096;
 
-    let mut allocator = unsafe { init_allocator(memory_map)
-        .expect("Failed to create Allocator") };
+    let mut allocator = unsafe {
+        init_allocator(memory_map)
+            .expect("Failed to create Allocator")
+    };
 
     // convert to and from raw ptr to bypass borrow checker
     let page_table = unsafe {
@@ -359,67 +411,33 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
         &mut *page_table_ptr
     };
 
-    log::info!("Mapping all memory. Last frame: {:#x}", last_frame_addr);
+    let entry_point = setup_mappings(PhysAddr(u64::from(last_frame_addr)), page_table, &mut allocator, kernel, kernel_max_size, &framebuffer);
 
-    for i in 0..(last_frame_addr / 4096) {
-        let phys =  i * 4096;
-        let virt = VirtAddr::new(phys + VIRT_MAPPING_OFFSET);
-
-        unsafe {
-            map_address(page_table, virt, phys, &mut allocator)
-                .expect("Failed to map memory");
-        }
-    }
-
-    map_kernel(&elf_file, kernel as u64, page_table, &mut allocator)
-        .expect("Failed to map kernel");
-
-    map_framebuffer(&framebuffer, page_table, &mut allocator)
-        .expect("Failed to map framebuffer");
     framebuffer.addr += VIRT_MAPPING_OFFSET;
 
     let stack = create_stack(20, page_table, &mut allocator)
         .expect("Failed to create stack");
 
-    let entry_point = elf_file.header.pt2.entry_point();
-
-    unsafe {
-        let ctx_switch_ptr = context_switch as *const () as u64;
-        map_address(page_table, align_down(VirtAddr::new_checked(ctx_switch_ptr).unwrap()), align_down_u64(ctx_switch_ptr), &mut allocator)
-            .expect("Failed to map context switch function");
-    }
-
     log::info!("Page table: {:#x}", page_table as *const PageTable as u64);
     log::info!("rsp: {:#x}", stack);
-    log::info!("Jumping to kernel entry point at {:#x}", entry_point);
+    log::info!("Jumping to kernel entry point at {:#x}", entry_point.0);
     log::info!("Kernel address: {:#x}", kernel as u64);
     log::info!("FB addr: {:#x}", framebuffer.addr);
     log::info!("FB info: {:#x}", &framebuffer as *const _ as u64);
 
-    static mut DUMMY_MMAP_ARRAY: [MemoryRegion; shared_lib::allocator::MAX_MEMORY_MAP_SIZE]
-    = [MemoryRegion{ ty: shared_lib::allocator::MemoryType::Reserved, addr: 0, page_count: 0 }; shared_lib::allocator::MAX_MEMORY_MAP_SIZE];
+    static mut DUMMY_MMAP_ARRAY: [MemoryRegion; MAX_MEMORY_MAP_SIZE] = [
+        MemoryRegion{ ty: shared_lib::allocator::MemoryType::Reserved, addr: 0, page_count: 0 };
+        MAX_MEMORY_MAP_SIZE
+    ];
+
     let mut boot_info = unsafe { BootInfo{ fb_info: framebuffer, memory_map: MemoryMap{ entries: &mut DUMMY_MMAP_ARRAY, next_free_entry_idx: 0 } } };
 
-    let boot_info_ptr = &boot_info as *const _ as u64;
-    log::info!("Mapping boot info. addr: {:#x}", boot_info_ptr);
-
-    unsafe {
-        map_address(page_table, align_down(VirtAddr::new_checked(boot_info_ptr).unwrap()), align_down_u64(boot_info_ptr), &mut allocator)
-            .expect("Failed to map boot info");
-    }
-
-    for i in 0..=MEMORY_MAP_PAGES {
-        let ptr = align_down_u64(allocator.memory_map.entries as *const _ as u64) + i as u64 * 4096;
-        unsafe {
-            map_address(page_table, VirtAddr::new_checked(ptr).unwrap(), ptr, &mut allocator)
-                .expect("Failed to map boot info");
-        }
-    }
+    map_bootinfo(&mut boot_info, page_table, &mut allocator);
 
     boot_info.memory_map = allocator.memory_map;
 
     unsafe {
-        context_switch(page_table as *const PageTable as u64, entry_point, stack, &boot_info);
+        context_switch(page_table as *const PageTable as u64, entry_point.0, stack, &boot_info);
     }
 }
 

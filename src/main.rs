@@ -6,7 +6,7 @@ extern crate shared_lib;
 
 use shared_lib::BootInfo;
 use shared_lib::entry_point;
-use rust_os::memory::{active_level_4_table, FrameAllocator, translate_addr};
+use rust_os::memory::{active_level_4_table, FrameAllocator};
 use rust_os::allocator::init_heap;
 
 use core::panic::PanicInfo;
@@ -47,7 +47,7 @@ fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
     log::info!("Hello from kernel!");
     shared_lib::serial_println!("Hello from kernel!");
 
-    let mut l4_table = unsafe {
+    let l4_table = unsafe {
         active_level_4_table()
     };
 
@@ -57,25 +57,17 @@ fn kernel_main(boot_info: &'static mut shared_lib::BootInfo) -> ! {
         .expect("Failed to init heap");
 
     let mut executor = Executor::new();
-    executor.spawn(Task::new(example_task()));
+    executor.spawn(Task::new(ok_task()));
     executor.spawn(Task::new(keyboard::print_keypresses()));
 
     executor.run();
-
-    log::info!("Everything is ok");
-
-    loop {
-        unsafe {
-            asm!("hlt", options(nomem, nostack, preserves_flags));
-        }
-    }
 }
 
 async fn async_number() -> u32 {
     42
 }
 
-async fn example_task() {
+async fn ok_task() {
     let number = async_number().await;
-    log::info!("async number: {}", number);
+    log::info!("Everything is ok. async number: {}", number);
 }

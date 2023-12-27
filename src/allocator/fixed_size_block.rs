@@ -1,8 +1,7 @@
-use alloc::alloc::alloc;
 use core::alloc::{GlobalAlloc, Layout};
 use core::{mem, ptr};
 use core::ptr::NonNull;
-use crate::allocator::{Dummy, Locked};
+use crate::allocator::Locked;
 
 struct ListNode {
     next: Option<&'static mut ListNode>,

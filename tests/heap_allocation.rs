@@ -8,7 +8,7 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use shared_lib::{entry_point, BootInfo, VIRT_MAPPING_OFFSET};
+use shared_lib::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use rust_os::allocator::{HEAP_SIZE, init_heap};
 use rust_os::memory::active_level_4_table;
@@ -16,12 +16,10 @@ use rust_os::memory::active_level_4_table;
 entry_point!(main);
 
 fn main(boot_info: &'static mut BootInfo) -> ! {
-    use rust_os::allocator;
-    use rust_os::memory::{self, FrameAllocator};
-    use shared_lib::addr::VirtAddr;
+    use rust_os::memory::FrameAllocator;
 
     rust_os::init();
-    let mut l4_table = unsafe {
+    let l4_table = unsafe {
         active_level_4_table()
     };
 

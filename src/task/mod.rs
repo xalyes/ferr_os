@@ -4,7 +4,7 @@ pub mod executor;
 use core::{future::Future, pin::Pin};
 use alloc::boxed::Box;
 use core::task::{Context, Poll};
-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Task {
     id: TaskId,

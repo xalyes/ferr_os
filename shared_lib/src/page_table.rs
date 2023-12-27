@@ -1,8 +1,7 @@
 use core::arch::asm;
-use core::fmt::Binary;
-use core::ops::{BitAnd, IndexMut};
+use core::ops::IndexMut;
 use bitflags::bitflags;
-use crate::addr::{PhysAddr, VirtAddr};
+use crate::addr::VirtAddr;
 
 pub const PAGE_SIZE: u64 = 4096;
 
@@ -153,7 +152,7 @@ unsafe fn create_next_table<'a>(page_table_entry: &'a mut PageTableEntry, page_t
     }
     else {
         let new_table = page_tables_allocator.allocate_page_table()?;
-        page_table_entry.set_addr((new_table as *const _ as u64 - offset), PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
+        page_table_entry.set_addr(new_table as *const _ as u64 - offset, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
         Ok(new_table)
     }
 }

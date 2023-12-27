@@ -1,14 +1,9 @@
 use core::arch::asm;
-use core::fmt;
 use crate::idt::{InterruptStackFrame, InterruptDescriptorTable, PageFaultErrorCode};
 use lazy_static::lazy_static;
 use crate::gdt;
 use spin;
 use crate::pic::{ChainedPics, Port};
-use shared_lib::interrupts::without_interrupts;
-use shared_lib::logger::{LockedLogger, LOGGER, Logger};
-use core::fmt::Write;
-use shared_lib::out;
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;

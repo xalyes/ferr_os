@@ -1,14 +1,10 @@
 pub mod fixed_size_block;
 
-use alloc::alloc::{GlobalAlloc, Layout};
-use core::ptr::null_mut;
 use shared_lib::addr::VirtAddr;
 use shared_lib::page_table::{map_address_with_offset, PageTable};
 use shared_lib::VIRT_MAPPING_OFFSET;
 use crate::allocator::fixed_size_block::FixedSizeBlockAllocator;
 use crate::memory::FrameAllocator;
-
-pub struct Dummy;
 
 pub struct Locked<A> {
     inner: spin::Mutex<A>
@@ -54,16 +50,6 @@ pub fn init_heap(page_table: &mut PageTable, frame_allocator: &mut FrameAllocato
     }
 
     Ok(())
-}
-
-unsafe impl GlobalAlloc for Locked<Dummy> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        null_mut()
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        panic!("do not call dealloc!");
-    }
 }
 
 fn align_up(addr: usize, align: usize) -> usize {

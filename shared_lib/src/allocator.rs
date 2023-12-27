@@ -61,8 +61,7 @@ impl Allocator {
     }
 
     pub fn allocate(&mut self, count: usize) -> Result<u64, &'static str> {
-        let mut memory_map = &mut self.memory_map;
-        let next_free_entry_idx = &mut memory_map.next_free_entry_idx;
+        let memory_map = &mut self.memory_map;
 
         for region in memory_map.iter_mut() {
             match &region.ty {
@@ -97,8 +96,7 @@ impl Allocator {
 
 impl PageTablesAllocator for Allocator {
     fn allocate_page_table(&mut self) -> Result::<&mut PageTable, &'static str> {
-        let mut memory_map = &mut self.memory_map;
-        let next_free_entry_idx = &mut memory_map.next_free_entry_idx;
+        let memory_map = &mut self.memory_map;
 
         for region in memory_map.iter_mut() {
             match &region.ty {

@@ -1,6 +1,5 @@
 use core::arch::asm;
 use shared_lib::addr::VirtAddr;
-use shared_lib::allocator::{MemoryRegion, MemoryType};
 use shared_lib::page_table::{PageTable, PageTablesAllocator};
 use shared_lib::VIRT_MAPPING_OFFSET;
 
@@ -25,10 +24,6 @@ pub unsafe fn translate_addr(addr: VirtAddr) -> Option<u64> {
 }
 
 fn translate_addr_inner(addr: VirtAddr) -> Option<u64> {
-    let p4_table = unsafe {
-        active_level_4_table()
-    };
-
     let table_indexes = [
         addr.p4_index(), addr.p3_index(), addr.p2_index(), addr.p1_index()
     ];
