@@ -6,6 +6,7 @@ use crossbeam_queue::ArrayQueue;
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::task::AtomicWaker;
 use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
+use shared_lib::interrupts::without_interrupts;
 use shared_lib::out;
 use shared_lib::logger::LOGGER;
 use crate::task::executor::STOP;
@@ -73,20 +74,9 @@ pub async fn print_keypresses() {
             if let Some(key) = keyboard.process_keyevent(key_event) {
                 match key {
                     DecodedKey::Unicode(character) => {
-                        out!("{}", character);
-                        if character == '\n' {
-                            if input_buffer == ['s', 'h', 'u', 't', 'd', 'o', 'w', 'n'] {
-                                out!("\nshutting down...\n");
-                                STOP.store(true, Relaxed);
-                                return;
-                            } else {
-                                input_buffer.clear();
-                            }
-                        } else {
-                            input_buffer.push(character);
-                        }
+                        without_interrupts(|| LOGGER.get().unwrap().lock().handle_keypress(character));
                     },
-                    DecodedKey::RawKey(key) => out!("{:?}", key)
+                    DecodedKey::RawKey(key) => out!(" '{:?}' ", key)
                 }
             }
         }

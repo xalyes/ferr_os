@@ -18,10 +18,10 @@ use uefi::data_types::CStr16;
 use uefi::proto::console::gop::GraphicsOutput;
 use xmas_elf::{ElfFile, header, program};
 use shared_lib::addr::{PhysAddr, VirtAddr};
-use shared_lib::logger::FrameBufferInfo;
 use shared_lib::page_table::{PageTable, PageTablesAllocator, map_address, remap_address, align_down, align_down_u64};
 use shared_lib::{BootInfo, logger, VIRT_MAPPING_OFFSET};
 use shared_lib::frame_allocator::{MemoryRegion, FrameAllocator, MemoryMap, MAX_MEMORY_MAP_SIZE, MEMORY_MAP_PAGES};
+use shared_lib::screen::{PixelFormat, FrameBufferInfo};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -86,10 +86,10 @@ fn init_framebuffer(image: uefi::Handle, system_table: &mut uefi::table::SystemT
         width: mode_info.resolution().0,
         height: mode_info.resolution().1,
         pixel_format: match mode_info.pixel_format() {
-            uefi::proto::console::gop::PixelFormat::Rgb => shared_lib::logger::PixelFormat::Rgb,
-            uefi::proto::console::gop::PixelFormat::Bgr => shared_lib::logger::PixelFormat::Bgr,
-            uefi::proto::console::gop::PixelFormat::Bitmask => shared_lib::logger::PixelFormat::Bitmask,
-            uefi::proto::console::gop::PixelFormat::BltOnly => shared_lib::logger::PixelFormat::BltOnly
+            uefi::proto::console::gop::PixelFormat::Rgb => PixelFormat::Rgb,
+            uefi::proto::console::gop::PixelFormat::Bgr => PixelFormat::Bgr,
+            uefi::proto::console::gop::PixelFormat::Bitmask => PixelFormat::Bitmask,
+            uefi::proto::console::gop::PixelFormat::BltOnly => PixelFormat::BltOnly
         },
         stride: mode_info.stride()
     })
@@ -381,7 +381,7 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
 
     log::info!("This is a very simple UEFI bootloader");
 
-    let kernel_max_size = 30 * 4096;
+    let kernel_max_size = 40 * 4096;
     let kernel = load_kernel(image, &mut system_table, kernel_max_size)
         .expect("Failed to load kernel");
 

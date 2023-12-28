@@ -11,11 +11,12 @@ pub mod serial;
 pub mod addr;
 pub mod page_table;
 pub mod frame_allocator;
+pub mod screen;
 
 use core::arch::asm;
 use core::panic::PanicInfo;
 use crate::frame_allocator::MemoryMap;
-use crate::logger::FrameBufferInfo;
+use crate::screen::FrameBufferInfo;
 
 pub struct BootInfo {
     pub fb_info: FrameBufferInfo,
