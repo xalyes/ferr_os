@@ -3,7 +3,9 @@
 #![no_main]
 
 extern crate shared_lib;
+extern crate alloc;
 
+use alloc::vec::Vec;
 use core::panic::PanicInfo;
 use core::arch::asm;
 use core::slice::{ from_raw_parts_mut, from_raw_parts };
@@ -21,6 +23,7 @@ use shared_lib::addr::{PhysAddr, VirtAddr};
 use shared_lib::logger::FrameBufferInfo;
 use shared_lib::page_table::{PageTable, PageTablesAllocator, map_address, remap_address, align_down, align_down_u64};
 use shared_lib::{BootInfo, logger, VIRT_MAPPING_OFFSET};
+use shared_lib::allocator::ALLOCATOR;
 use shared_lib::frame_allocator::{MemoryRegion, FrameAllocator, MemoryMap, MAX_MEMORY_MAP_SIZE, MEMORY_MAP_PAGES};
 
 #[panic_handler]
@@ -375,11 +378,25 @@ fn map_bootinfo(boot_info: &BootInfo, page_table: &mut PageTable, allocator: &mu
     }
 }
 
+fn setup_heap(system_table: &mut uefi::table::SystemTable<uefi::table::Boot>) {
+    let heap_size_in_pages = 25;
+    let heap_addr = PhysAddr(u64::from(system_table
+        .boot_services()
+        .allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, heap_size_in_pages)
+        .unwrap()));
+
+    unsafe {
+        ALLOCATOR.lock().init(heap_addr.0 as usize, heap_size_in_pages * 4096);
+    }
+}
+
 #[entry]
 fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi::table::Boot>) -> uefi::Status {
     let mut framebuffer = init_logger(image, &mut system_table);
 
     log::info!("This is a very simple UEFI bootloader");
+
+    setup_heap(&mut system_table);
 
     let kernel_max_size = 30 * 4096;
     let kernel = load_kernel(image, &mut system_table, kernel_max_size)

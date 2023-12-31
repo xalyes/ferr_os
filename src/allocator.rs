@@ -1,29 +1,8 @@
-pub mod fixed_size_block;
-
 use shared_lib::addr::VirtAddr;
+use shared_lib::allocator::ALLOCATOR;
 use shared_lib::page_table::{map_address_with_offset, PageTable};
 use shared_lib::VIRT_MAPPING_OFFSET;
-use crate::allocator::fixed_size_block::FixedSizeBlockAllocator;
 use shared_lib::frame_allocator::FrameAllocator;
-
-pub struct Locked<A> {
-    inner: spin::Mutex<A>
-}
-
-impl<A> Locked<A> {
-    pub const fn new(inner: A) -> Self {
-        Locked {
-            inner: spin::Mutex::new(inner)
-        }
-    }
-
-    pub fn lock(&self) -> spin::MutexGuard<A> {
-        self.inner.lock()
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: Locked<FixedSizeBlockAllocator> = Locked::new(FixedSizeBlockAllocator::new());
 
 pub const HEAP_START: usize = 0x_7777_7777_0000;
 pub const HEAP_SIZE: usize = 100 * 1024; // 100 KiB
@@ -51,8 +30,3 @@ pub fn init_heap(page_table: &mut PageTable, frame_allocator: &mut FrameAllocato
 
     Ok(())
 }
-
-fn align_up(addr: usize, align: usize) -> usize {
-    (addr + align - 1) & !(align - 1)
-}
-

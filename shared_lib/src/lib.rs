@@ -3,6 +3,9 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(test_runner)]
 #![reexport_test_harness_main = "test_main"]
+#![feature(const_mut_refs)]
+
+extern crate alloc;
 
 pub mod logger;
 pub mod bits;
@@ -11,6 +14,7 @@ pub mod serial;
 pub mod addr;
 pub mod page_table;
 pub mod frame_allocator;
+pub mod allocator;
 
 use core::arch::asm;
 use core::panic::PanicInfo;

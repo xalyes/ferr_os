@@ -7,11 +7,11 @@ extern crate shared_lib;
 use shared_lib::{BootInfo, VIRT_MAPPING_OFFSET};
 use shared_lib::entry_point;
 use rust_os::memory::{active_level_4_table};
-use rust_os::allocator::init_heap;
 
 use core::panic::PanicInfo;
 use shared_lib::logger;
 use core::arch::asm;
+use rust_os::allocator::init_heap;
 use rust_os::task::executor::Executor;
 use rust_os::task::{keyboard, Task};
 
