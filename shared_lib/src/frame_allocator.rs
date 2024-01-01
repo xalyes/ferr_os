@@ -89,7 +89,7 @@ impl PageTablesAllocator for FrameAllocator {
     fn allocate_page_table(&mut self) -> Result::<&mut PageTable, &'static str> {
         let frame = self.allocate_frame().expect("Out of memory - failed to allocate frame");
 
-        log::info!("Allocated page table. Addr: {:#x}", frame);
+        log::debug!("Allocated page table. Addr: {:#x}", frame);
         let page = VirtAddr::new_checked(frame + self.mapping_offset)
             .expect("Failed to create virt address");
 

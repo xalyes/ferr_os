@@ -1,10 +1,5 @@
 pub mod fixed_size_block;
-
-use crate::addr::VirtAddr;
-use crate::page_table::{map_address_with_offset, PageTable};
-use crate::VIRT_MAPPING_OFFSET;
 use crate::allocator::fixed_size_block::FixedSizeBlockAllocator;
-use crate::frame_allocator::FrameAllocator;
 
 pub struct Locked<A> {
     inner: spin::Mutex<A>

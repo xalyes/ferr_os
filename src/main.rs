@@ -38,6 +38,20 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     let fb_info = boot_info.fb_info;
     let memory_map = &boot_info.memory_map;
 
+    shared_lib::serial_println!("Hello from kernel!");
+
+    shared_lib::serial_println!("Creating allocator");
+    let l4_table = unsafe {
+        active_level_4_table()
+    };
+
+    let mut allocator = shared_lib::frame_allocator::FrameAllocator::new(memory_map, VIRT_MAPPING_OFFSET, boot_info.memory_map_next_free_frame);
+
+    shared_lib::serial_println!("Creating heap");
+    init_heap(l4_table, &mut allocator)
+        .expect("Failed to init heap");
+
+    shared_lib::serial_println!("Creating logger");
     let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(fb_info));
     log::set_logger(logger).unwrap();
     log::set_max_level(log::LevelFilter::Debug);
@@ -45,16 +59,6 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     rust_os::init();
 
     log::info!("Hello from kernel!");
-    shared_lib::serial_println!("Hello from kernel!");
-
-    let l4_table = unsafe {
-        active_level_4_table()
-    };
-
-    let mut allocator = shared_lib::frame_allocator::FrameAllocator::new(memory_map, VIRT_MAPPING_OFFSET, boot_info.memory_map_next_free_frame);
-
-    init_heap(l4_table, &mut allocator)
-        .expect("Failed to init heap");
 
     let mut executor: Executor = Executor::new();
     executor.spawn(Task::new(ok_task()));

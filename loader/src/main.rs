@@ -5,7 +5,6 @@
 extern crate shared_lib;
 extern crate alloc;
 
-use alloc::vec::Vec;
 use core::panic::PanicInfo;
 use core::arch::asm;
 use core::slice::{ from_raw_parts_mut, from_raw_parts };
@@ -392,13 +391,12 @@ fn setup_heap(system_table: &mut uefi::table::SystemTable<uefi::table::Boot>) {
 
 #[entry]
 fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi::table::Boot>) -> uefi::Status {
+    setup_heap(&mut system_table);
     let mut framebuffer = init_logger(image, &mut system_table);
 
     log::info!("This is a very simple UEFI bootloader");
 
-    setup_heap(&mut system_table);
-
-    let kernel_max_size = 30 * 4096;
+    let kernel_max_size = 40 * 4096;
     let kernel = load_kernel(image, &mut system_table, kernel_max_size)
         .expect("Failed to load kernel");
 

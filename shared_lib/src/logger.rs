@@ -1,3 +1,6 @@
+use alloc::collections::VecDeque;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::fmt;
 use core::slice::from_raw_parts_mut;
 use core::ptr::read_volatile;
@@ -31,13 +34,38 @@ pub struct Logger {
     fb: &'static mut [u8],
     x_pos: usize,
     y_pos: usize,
+
+    char_buffer: VecDeque<Vec<char>>,
+    char_buffer_width: usize,
+    char_buffer_height: usize
 }
 
 impl Logger {
     pub fn new(fb_info: FrameBufferInfo) -> Self {
         let fb_slice = unsafe { from_raw_parts_mut(fb_info.addr as *mut u8, fb_info.size) };
         fb_slice.fill(0);
-        Logger{fb_info, fb: &mut *fb_slice, x_pos: 1, y_pos: 1 }
+
+        let w = (fb_info.width - 1) / 8;
+        let h = (fb_info.height - 1) / 8;
+
+        let mut char_buffer = VecDeque::with_capacity(h);
+        for _ in 0..w {
+            char_buffer.push_back(vec!['\0'; w]);
+        }
+
+        Logger{fb_info, fb: &mut *fb_slice, x_pos: 0, y_pos: 0, char_buffer, char_buffer_width: w, char_buffer_height: h }
+    }
+
+    pub fn draw_char_buffer(&mut self) {
+        for y in 0..self.char_buffer_height {
+            for x in 0..self.char_buffer_width {
+                let rendered = font8x8::BASIC_FONTS
+                    .get(self.char_buffer[y][x])
+                    .unwrap();
+
+                self.write_8x8(rendered, 1 + x * 8, 1 + y * 8);
+            }
+        }
     }
 
     fn write_pixel(&mut self, x: usize, y: usize, intensity: u8) {
@@ -57,8 +85,16 @@ impl Logger {
     }
 
     fn newline(&mut self) {
-        self.y_pos += 8;
+        self.y_pos += 1;
         self.carriage_return();
+
+        if self.y_pos >= self.char_buffer_height {
+            self.char_buffer.pop_front();
+            self.char_buffer.push_back(vec!['\0'; self.char_buffer_width]);
+            self.y_pos = self.char_buffer_height - 1;
+            self.x_pos = 0;
+            self.draw_char_buffer();
+        }
     }
 
     fn carriage_return(&mut self) {
@@ -66,16 +102,29 @@ impl Logger {
     }
 
     pub fn clear(&mut self) {
-        self.x_pos = 1;
-        self.y_pos = 1;
+        self.x_pos = 0;
+        self.y_pos = 0;
         self.fb.fill(0);
+
+        for i in 0..self.char_buffer_width {
+            self.char_buffer[i].fill('\0');
+        }
     }
 
-    fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.fb_info.width
     }
-    fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.fb_info.height
+    }
+
+    pub fn write_8x8(&mut self, rendered: [u8; 8], x_pos: usize, y_pos: usize) {
+        for (y, byte) in rendered.iter().enumerate() {
+            for (x, bit) in (0..8).enumerate() {
+                let intensity = if *byte & (1 << bit) == 0 { 0 } else { 255 };
+                self.write_pixel(x_pos + x, y_pos + y, intensity);
+            }
+        }
     }
 
     pub fn write_char(&mut self, c: char) {
@@ -83,24 +132,19 @@ impl Logger {
             '\n' => self.newline(),
             '\r' => self.carriage_return(),
             c => {
-                if self.x_pos >= self.width() {
+                if self.x_pos >= self.char_buffer_width {
                     self.newline();
                 }
-                if self.y_pos >= (self.height() - 8) {
-                    self.clear();
-                }
+
+                self.char_buffer[self.y_pos][self.x_pos] = c;
 
                 let rendered = font8x8::BASIC_FONTS
                     .get(c)
                     .unwrap();
 
-                for (y, byte) in rendered.iter().enumerate() {
-                    for (x, bit) in (0..8).enumerate() {
-                        let intensity = if *byte & (1 << bit) == 0 { 0 } else { 255 };
-                        self.write_pixel(self.x_pos + x, self.y_pos + y, intensity);
-                    }
-                }
-                self.x_pos += 8;
+                self.write_8x8(rendered, 1 + self.x_pos * 8, 1 + self.y_pos * 8);
+
+                self.x_pos += 1;
             }
         }
     }
