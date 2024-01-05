@@ -37,7 +37,9 @@ pub struct Logger {
 
     char_buffer: VecDeque<Vec<char>>,
     char_buffer_width: usize,
-    char_buffer_height: usize
+    char_buffer_height: usize,
+
+    command_buffer: Vec<char>
 }
 
 impl Logger {
@@ -53,7 +55,7 @@ impl Logger {
             char_buffer.push_back(vec!['\0'; w]);
         }
 
-        Logger{fb_info, fb: &mut *fb_slice, x_pos: 0, y_pos: 0, char_buffer, char_buffer_width: w, char_buffer_height: h }
+        Logger{fb_info, fb: &mut *fb_slice, x_pos: 0, y_pos: 0, char_buffer, char_buffer_width: w, char_buffer_height: h, command_buffer: Vec::new() }
     }
 
     pub fn draw_char_buffer(&mut self) {
@@ -88,13 +90,28 @@ impl Logger {
         self.y_pos += 1;
         self.carriage_return();
 
-        if self.y_pos >= self.char_buffer_height {
+        let lines_need = {
+            if self.command_buffer.len() == 0 {
+                0
+            } else {
+                1 + self.command_buffer.len() / self.char_buffer_width
+            }
+        };
+
+        while self.y_pos + lines_need >= self.char_buffer_height {
             self.char_buffer.pop_front();
             self.char_buffer.push_back(vec!['\0'; self.char_buffer_width]);
-            self.y_pos = self.char_buffer_height - 1;
-            self.x_pos = 0;
-            self.draw_char_buffer();
+            self.y_pos -= 1;
         }
+
+        self.x_pos = 0;
+
+        let mut x = 0;
+        for ch in &self.command_buffer {
+            self.char_buffer[self.y_pos + 1][x] = *ch;
+            x += 1;
+        }
+        self.draw_char_buffer();
     }
 
     fn carriage_return(&mut self) {
@@ -147,6 +164,36 @@ impl Logger {
                 self.x_pos += 1;
             }
         }
+    }
+
+    pub fn write_char_to_command_line(&mut self, c: char) {
+        match c {
+            '\n' => {
+                //self.write_char('\n');
+
+                self.command_buffer.clear();
+
+                self.write_char('\n');
+            },
+            c => {
+                self.command_buffer.push(c);
+                let lines_need = 1 + self.command_buffer.len() / self.char_buffer_width;
+
+                while self.y_pos + lines_need >= self.char_buffer_height {
+                    self.char_buffer.pop_front();
+                    self.char_buffer.push_back(vec!['\0'; self.char_buffer_width]);
+                    self.y_pos -= 1;
+                }
+
+                let mut x = 0;
+                for ch in &self.command_buffer {
+                    self.char_buffer[self.y_pos + 1][x] = *ch;
+                    x += 1;
+                }
+                self.draw_char_buffer();
+            }
+        }
+
     }
 }
 
