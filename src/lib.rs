@@ -5,7 +5,10 @@
 extern crate alloc;
 use core::arch::asm;
 use core::panic::PanicInfo;
+use shared_lib::frame_allocator::FrameAllocator;
 use shared_lib::serial_println;
+use crate::apic::{disable_pic, initialize_apic_timer};
+use crate::xsdt::read_xsdt;
 
 pub mod idt;
 mod interrupts;
@@ -14,6 +17,8 @@ mod pic;
 pub mod memory;
 pub mod task;
 pub mod allocator;
+mod apic;
+mod xsdt;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");
@@ -26,12 +31,10 @@ pub fn test_panic_handler(info: &PanicInfo) -> ! {
     }
 }
 
-pub fn init() {
+pub fn init(allocator: &mut FrameAllocator, rsdp_addr: u64) {
     gdt::init();
     interrupts::init_idt();
-
-    unsafe { interrupts::PICS.lock().initialize(); };
-
-    // Enable hardware interrupts
-    unsafe { asm!("sti", options(nomem, nostack)); }
+    let local_apic = read_xsdt(allocator, rsdp_addr);
+    disable_pic();
+    initialize_apic_timer(local_apic);
 }

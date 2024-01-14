@@ -23,11 +23,23 @@ use crate::logger::FrameBufferInfo;
 
 pub struct BootInfo {
     pub fb_info: FrameBufferInfo,
+    pub rsdp_addr: u64,
     pub memory_map: MemoryMap,
     pub memory_map_next_free_frame: usize
 }
 
 pub const VIRT_MAPPING_OFFSET: u64 = 0x180_0000_0000;
+
+#[inline]
+pub unsafe fn read_u32_ptr(ptr: *mut u32, offset: u32) -> u32 {
+    core::ptr::read_volatile(ptr.offset((offset / 4) as isize))
+}
+
+#[inline]
+pub unsafe fn write_u32_ptr(ptr: *mut u32, offset: u32, value: u32) {
+    core::ptr::write_volatile(ptr.offset((offset / 4) as isize), value);
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]

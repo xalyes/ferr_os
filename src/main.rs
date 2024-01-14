@@ -6,7 +6,7 @@ extern crate shared_lib;
 
 use shared_lib::{BootInfo, VIRT_MAPPING_OFFSET};
 use shared_lib::entry_point;
-use rust_os::memory::{active_level_4_table};
+use rust_os::memory::active_level_4_table;
 
 use core::panic::PanicInfo;
 use shared_lib::logger;
@@ -23,7 +23,7 @@ fn panic(info: &PanicInfo) -> ! {
             .map(|l| l.force_unlock())
     };
 
-    log::info!("{}", info);
+    log::error!("{}", info);
 
     loop {
         unsafe {
@@ -56,9 +56,9 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     log::set_logger(logger).unwrap();
     log::set_max_level(log::LevelFilter::Debug);
 
-    rust_os::init();
-
     log::info!("Hello from kernel!");
+
+    rust_os::init(&mut allocator, boot_info.rsdp_addr);
 
     let mut executor: Executor = Executor::new();
     executor.spawn(Task::new(ok_task()));
@@ -71,7 +71,7 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
 
     loop {
         unsafe {
-            asm!("cli; hlt", options(nomem, nostack, preserves_flags));
+            asm!("hlt", options(nomem, nostack, preserves_flags));
         }
     }
 }

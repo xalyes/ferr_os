@@ -1,9 +1,11 @@
 use core::arch::asm;
+use core::ptr;
 use crate::idt::{InterruptStackFrame, InterruptDescriptorTable, PageFaultErrorCode};
 use lazy_static::lazy_static;
 use crate::gdt;
 use spin;
 use crate::pic::{ChainedPics, Port};
+use crate::apic::Apic;
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -13,6 +15,7 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard,
+    Spurious = 39
 }
 
 impl InterruptIndex {
@@ -28,6 +31,9 @@ impl InterruptIndex {
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
+pub static APIC: spin::Mutex<Apic> =
+    spin::Mutex::new(Apic::new());
+
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
@@ -38,6 +44,7 @@ lazy_static! {
         idt.general_protection_fault.set_handler_fn(general_protection_fault_handler);
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::Spurious.as_usize()].set_handler_fn(spurious_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
 
         idt
@@ -70,8 +77,16 @@ extern "x86-interrupt" fn timer_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
     unsafe {
-        PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+        static mut I: u64 = 0;
+        if I % 100 == 0 {
+            log::info!("1 sec timer tick. {}", I / 100);
+        }
+        I += 1;
+    }
+
+    unsafe {
+        APIC.lock()
+            .notify_end_of_interrupt();
     }
 }
 
@@ -109,9 +124,21 @@ extern "x86-interrupt" fn page_fault_handler(
     log::info!("Error Code: {:?}", error_code);
     log::info!("{:#?}", stack_frame);
 
+    log::info!("Reading stack from address {:#x}", stack_frame.value.stack_pointer.0);
+    unsafe {
+        for i in 0..40 {
+            log::info!("{}: {:#x}", i, ptr::read_volatile((stack_frame.value.stack_pointer.0 + 8 * i) as *const u64));
+        }
+    }
+
     loop {
         unsafe {
             asm!("hlt", options(nomem, nostack, preserves_flags));
         }
     }
+}
+
+extern "x86-interrupt" fn spurious_handler(
+    _stack_frame: InterruptStackFrame)
+{
 }

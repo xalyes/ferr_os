@@ -138,11 +138,17 @@ impl Logger {
 
                 self.char_buffer[self.y_pos][self.x_pos] = c;
 
-                let rendered = font8x8::BASIC_FONTS
-                    .get(c)
-                    .unwrap();
-
-                self.write_8x8(rendered, 1 + self.x_pos * 8, 1 + self.y_pos * 8);
+                if c != '\0' {
+                    let rendered = font8x8::BASIC_FONTS
+                        .get(c);
+                    if rendered.is_none() {
+                        panic!("Failed to render char {}", c as u32);
+                    }
+                    self.write_8x8(rendered.unwrap(), 1 + self.x_pos * 8, 1 + self.y_pos * 8);
+                } else {
+                    let rendered = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+                    self.write_8x8(rendered, 1 + self.x_pos * 8, 1 + self.y_pos * 8);
+                }
 
                 self.x_pos += 1;
             }

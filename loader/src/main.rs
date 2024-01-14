@@ -407,7 +407,7 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
         .unwrap()));
 
     log::info!("Exiting boot services...");
-    let (_runtime_system_table, memory_map) = system_table.exit_boot_services(MemoryType::LOADER_DATA);
+    let (runtime_system_table, memory_map) = system_table.exit_boot_services(MemoryType::LOADER_DATA);
 
     let last_memory_region = memory_map.entries().last().unwrap();
     let last_frame_addr = last_memory_region.phys_start + (last_memory_region.page_count - 1) * 4096;
@@ -433,14 +433,30 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
     let stack = create_stack(stack_addr, 20, page_table, &mut allocator)
         .expect("Failed to create stack");
 
+    let rsdp_addr = {
+        use uefi::table::cfg;
+        let mut config_entries = runtime_system_table.config_table().iter();
+        // look for an ACPI2 RSDP first
+        let acpi2_rsdp = config_entries.find(|entry| matches!(entry.guid, cfg::ACPI2_GUID));
+        if acpi2_rsdp.is_some() {
+            log::info!("ACPI2 found! {:#x}", acpi2_rsdp.unwrap().address as u64);
+        }
+
+        // if no ACPI2 RSDP is found, look for a ACPI1 RSDP
+        let rsdp = acpi2_rsdp
+            .or_else(|| config_entries.find(|entry| matches!(entry.guid, cfg::ACPI_GUID)));
+        rsdp.map(|entry| entry.address as u64)
+    };
+
     log::info!("Page table: {:#x}", page_table as *const PageTable as u64);
     log::info!("rsp: {:#x}", stack);
     log::info!("Jumping to kernel entry point at {:#x}", entry_point.0);
     log::info!("Kernel address: {:#x}", kernel as u64);
     log::info!("FB addr: {:#x}", framebuffer.addr);
     log::info!("FB info: {:#x}", &framebuffer as *const _ as u64);
+    log::info!("RSDP: {:#x}", rsdp_addr.unwrap_or(0));
 
-    let mut boot_info = BootInfo{ fb_info: framebuffer, memory_map, memory_map_next_free_frame: 0 };
+    let mut boot_info = BootInfo{ fb_info: framebuffer, rsdp_addr: rsdp_addr.unwrap_or(0), memory_map, memory_map_next_free_frame: 0 };
 
     map_bootinfo(&boot_info, page_table, &mut allocator);
 

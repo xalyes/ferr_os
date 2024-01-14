@@ -96,7 +96,7 @@ pub struct InterruptStackFrameValue {
 #[repr(C)]
 #[derive(Debug)]
 pub struct InterruptStackFrame {
-    value: InterruptStackFrameValue,
+    pub(crate) value: InterruptStackFrameValue,
 }
 
 bitflags! {

@@ -18,7 +18,6 @@ entry_point!(main);
 fn main(boot_info: &'static BootInfo) -> ! {
     use shared_lib::frame_allocator::FrameAllocator;
 
-    rust_os::init();
     let l4_table = unsafe {
         active_level_4_table()
     };
@@ -27,6 +26,8 @@ fn main(boot_info: &'static BootInfo) -> ! {
 
     init_heap(l4_table, &mut allocator)
         .expect("Failed to init heap");
+
+    rust_os::init(&mut allocator, boot_info.rsdp_addr);
 
     test_main();
     loop {}
