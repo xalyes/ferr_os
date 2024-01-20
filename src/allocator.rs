@@ -5,7 +5,7 @@ use shared_lib::VIRT_MAPPING_OFFSET;
 use shared_lib::frame_allocator::FrameAllocator;
 
 pub const HEAP_START: usize = 0x_7777_7777_0000;
-pub const HEAP_SIZE: usize = 100 * 1024; // 100 KiB
+pub const HEAP_SIZE: usize = 300 * 1024; // 300 KiB
 
 pub fn init_heap(page_table: &mut PageTable, frame_allocator: &mut FrameAllocator) -> Result<(), &'static str> {
     let mut heap = VirtAddr::new(HEAP_START as u64);

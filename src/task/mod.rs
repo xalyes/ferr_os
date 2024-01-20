@@ -1,5 +1,6 @@
 pub mod keyboard;
 pub mod executor;
+pub mod timer;
 
 use core::{future::Future, pin::Pin};
 use alloc::boxed::Box;

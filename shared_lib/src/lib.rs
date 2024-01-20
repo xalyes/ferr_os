@@ -40,6 +40,13 @@ pub unsafe fn write_u32_ptr(ptr: *mut u32, offset: u32, value: u32) {
     core::ptr::write_volatile(ptr.offset((offset / 4) as isize), value);
 }
 
+#[inline]
+pub fn get_tsc() -> u64 {
+    let mut edx: u32;
+    let mut eax: u32;
+    unsafe { asm!("rdtsc", out("edx") edx, out("eax") eax); }
+    eax as u64 | ((edx as u64) << 32)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]

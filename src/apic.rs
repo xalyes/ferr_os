@@ -3,7 +3,7 @@ use core::arch::asm;
 use shared_lib::addr::VirtAddr;
 use crate::pic::Port;
 use crate::interrupts;
-use shared_lib::{read_u32_ptr, write_u32_ptr};
+use shared_lib::{get_tsc, read_u32_ptr, write_u32_ptr};
 use crate::interrupts::InterruptIndex;
 
 pub const APIC_APICID: u32     = 0x20;
@@ -88,14 +88,6 @@ fn is_tsc_constant() -> bool {
     }
     log::info!("{:#x}", edx);
     return (edx & 0x100) == 0x100;
-}
-
-#[inline]
-pub fn get_tsc() -> u64 {
-    let mut edx: u32;
-    let mut eax: u32;
-    unsafe { asm!("rdtsc", out("edx") edx, out("eax") eax); }
-    eax as u64 | ((edx as u64) << 32)
 }
 
 /*

@@ -76,13 +76,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
 extern "x86-interrupt" fn timer_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
-    unsafe {
-        static mut I: u64 = 0;
-        if I % 100 == 0 {
-            log::info!("1 sec timer tick. {}", I / 100);
-        }
-        I += 1;
-    }
+    crate::task::timer::raise_timer();
 
     unsafe {
         APIC.lock()
