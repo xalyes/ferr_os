@@ -1,16 +1,9 @@
-use alloc::vec::Vec;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
-use core::sync::atomic::Ordering::Relaxed;
 use core::task::{Context, Poll};
 use conquer_once::spin::OnceCell;
 use futures_util::stream::{Stream, StreamExt};
-use crossbeam_queue::ArrayQueue;
 use futures_util::task::AtomicWaker;
-use pc_keyboard::{DecodedKey, HandleControl, Keyboard, layouts, ScancodeSet1};
-use shared_lib::out;
-use crate::task::executor::STOP;
-use crate::task::keyboard::ScancodeStream;
 
 static TIMER_FLAG: OnceCell<AtomicBool> = OnceCell::uninit();
 static WAKER: AtomicWaker = AtomicWaker::new();

@@ -7,13 +7,13 @@ use core::arch::asm;
 use core::panic::PanicInfo;
 use shared_lib::frame_allocator::FrameAllocator;
 use shared_lib::serial_println;
-use crate::apic::{disable_pic, initialize_apic_timer};
+use crate::apic::{disable_pic, initialize_apic};
 use crate::xsdt::read_xsdt;
 
 pub mod idt;
 mod interrupts;
 pub mod gdt;
-mod pic;
+mod port;
 pub mod memory;
 pub mod task;
 pub mod allocator;
@@ -34,7 +34,7 @@ pub fn test_panic_handler(info: &PanicInfo) -> ! {
 pub fn init(allocator: &mut FrameAllocator, rsdp_addr: u64) {
     gdt::init();
     interrupts::init_idt();
-    let local_apic = read_xsdt(allocator, rsdp_addr);
+    let apic_addrs= read_xsdt(allocator, rsdp_addr);
     disable_pic();
-    initialize_apic_timer(local_apic);
+    initialize_apic(apic_addrs);
 }

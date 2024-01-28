@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 use core::arch::asm;
 use shared_lib::addr::VirtAddr;
-use crate::pic::Port;
+use crate::port::Port;
 use crate::interrupts;
 use shared_lib::{get_tsc, read_u32_ptr, write_u32_ptr};
+use shared_lib::bits::{set_bit, set_bits};
 use crate::interrupts::InterruptIndex;
+use crate::xsdt::ApicAddresses;
 
 pub const APIC_APICID: u32     = 0x20;
 pub const APIC_APICVER: u32    = 0x30;
@@ -64,7 +66,7 @@ impl Apic {
 
     unsafe fn apic_write(&self, offset: u32, value: u32) {
         let apic_base = self.apic_base.0 as *mut u32;
-        core::ptr::write_volatile(apic_base.offset((offset / 4) as isize), value);
+        core::ptr::write_volatile(apic_base.byte_offset(offset as isize), value);
     }
 
     pub unsafe fn notify_end_of_interrupt(&mut self) {
@@ -314,8 +316,18 @@ pub fn disable_pic() {
     }
 }
 
-pub fn initialize_apic_timer(local_apic: VirtAddr) {
-    unsafe { interrupts::APIC.lock().initialize(local_apic); };
+unsafe fn read_io_apic(io_apic: *mut u32, register: u32) -> u32 {
+    write_u32_ptr(io_apic, 0, register & 0xff);
+    read_u32_ptr(io_apic, 0x10)
+}
+
+unsafe fn write_io_apic(io_apic: *mut u32, register: u32, value: u32) {
+    write_u32_ptr(io_apic, 0, register & 0xff);
+    write_u32_ptr(io_apic, 0x10, value);
+}
+
+pub fn initialize_apic(apic_addrs: ApicAddresses) {
+    unsafe { interrupts::APIC.lock().initialize(apic_addrs.local_apic_addr); };
 
     log::info!("Starting to initialize APIC timer");
 
@@ -328,13 +340,13 @@ pub fn initialize_apic_timer(local_apic: VirtAddr) {
 
     log::info!("APIC enabled");
 
-    let apic_base = local_apic.0 as *mut u32;
+    let apic_base = apic_addrs.local_apic_addr.0 as *mut u32;
 
     unsafe {
         write_u32_ptr(apic_base, APIC_SPURIOUS, read_u32_ptr(apic_base, APIC_SPURIOUS) | APIC_SW_ENABLE);
 
         asm!("cli", options(nomem, nostack));
-        let cpu_khz = pit_hpet_ptimer_calibrate_cpu(local_apic);
+        let cpu_khz = pit_hpet_ptimer_calibrate_cpu(apic_addrs.local_apic_addr);
         log::info!("Detected CPU freq: {} Khz", cpu_khz);
 
         let timer_frequency = 100; // x interrupts per sec
@@ -349,7 +361,29 @@ pub fn initialize_apic_timer(local_apic: VirtAddr) {
         // although I have found buggy hardware that required it
         write_u32_ptr(apic_base, APIC_TMRDIV, 0x03);
 
+        let local_apic_id = read_u32_ptr(apic_base, APIC_APICID);
+
+        let io_apic_base = apic_addrs.io_apic_addr.0 as *mut u32;
+
+        let version = read_io_apic(io_apic_base, 0x1);
+
+        log::info!("IOAPIC[0]: version: {}, address: {:#x}", version as u8, apic_addrs.io_apic_addr.0);
+        let mut low_reg = read_io_apic(io_apic_base, 0x12) as u64;
+
+
+        set_bits(&mut low_reg, InterruptIndex::Keyboard as u64, 0);
+
+        set_bits(&mut low_reg, 0, 8); // Fixed delivery mode
+        set_bit(&mut low_reg, 11, false); // Physical destination
+        set_bit(&mut low_reg, 13, false); // Pin polarity - active high
+        set_bit(&mut low_reg, 15, false); // Trigger mode - edge
+        set_bit(&mut low_reg, 16, false); // unmask interrupt
+
+        write_io_apic(io_apic_base, 0x12, low_reg as u32);
+        write_io_apic(io_apic_base, 0x13, local_apic_id);
+
         // enable hardware interrupts
         asm!("sti", options(nomem, nostack));
     }
+
 }

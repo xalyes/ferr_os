@@ -1,7 +1,7 @@
 use core::slice::from_raw_parts;
 use shared_lib::addr::{PhysAddr, VirtAddr};
 use shared_lib::frame_allocator::FrameAllocator;
-use shared_lib::page_table::map_address_with_offset;
+use shared_lib::page_table::{align_down, align_down_u64, map_address_with_offset};
 use shared_lib::VIRT_MAPPING_OFFSET;
 use crate::memory::active_level_4_table;
 
@@ -105,7 +105,28 @@ struct MadtEntryHeader {
     pub record_length: u8
 }
 
-fn handle_madt(header: &AcpiSdtHeader, data_addr: VirtAddr) -> PhysAddr {
+#[repr(C)]
+struct MadtEntryIOApic {
+    pub io_apic_id: u8,
+    pub reserved: u8,
+    pub io_apic_addr: u32,
+    pub global_system_interrupt_base: u32
+}
+
+#[repr(C)]
+struct MadtEntryIOApicInterruptSource {
+    pub bus_source: u8,
+    pub irq_source: u8,
+    pub global_system_interrupt: u32,
+    pub flags: u16
+}
+
+struct ApicPhysAddrs {
+    pub local_apic_addr: PhysAddr,
+    pub io_apic_addr: PhysAddr
+}
+
+fn handle_madt(header: &AcpiSdtHeader, data_addr: VirtAddr) -> Result<ApicPhysAddrs, &'static str> {
     log::info!("MADT handling. Len: {}", header.length);
 
     let mut check_sum = header.get_bytes_sum();
@@ -115,7 +136,7 @@ fn handle_madt(header: &AcpiSdtHeader, data_addr: VirtAddr) -> PhysAddr {
         }
     }
     if check_sum != 0 {
-        panic!("MADT checksum failed");
+        return Err("MADT checksum failed");
     }
 
     let madt_header = unsafe {
@@ -124,6 +145,7 @@ fn handle_madt(header: &AcpiSdtHeader, data_addr: VirtAddr) -> PhysAddr {
 
     log::info!("local apic phys: {:#x} flags: {}", madt_header.local_apic_addr, madt_header.apic_flags);
 
+    let mut result: Result<ApicPhysAddrs, &'static str> = Err("Invalid MADT");
     let mut offset: u64 = 8;
     while offset < (header.length - 36) as u64 {
         let entry_header = unsafe {
@@ -131,13 +153,37 @@ fn handle_madt(header: &AcpiSdtHeader, data_addr: VirtAddr) -> PhysAddr {
         };
 
         log::info!("MADT entry: type: {}, len: {}", entry_header.entry_type, entry_header.record_length);
+
+        if entry_header.entry_type == 1 {
+            let io_apic_entry = unsafe {
+                ((data_addr.0 + offset + 2) as *const MadtEntryIOApic).as_ref().unwrap()
+            };
+
+            log::info!("io apic: addr: {:#x}, global system int base: {:#x}. id: {}", io_apic_entry.io_apic_addr, io_apic_entry.global_system_interrupt_base, io_apic_entry.io_apic_id);
+
+            result = Ok(ApicPhysAddrs {
+                local_apic_addr: PhysAddr(madt_header.local_apic_addr as u64),
+                io_apic_addr: PhysAddr(io_apic_entry.io_apic_addr as u64)
+            });
+        } else if entry_header.entry_type == 2 {
+            let io_apic_source_interrupt_entry = unsafe {
+                ((data_addr.0 + offset + 2) as *const MadtEntryIOApicInterruptSource).as_ref().unwrap()
+            };
+
+            log::info!("Entry Type 2: I/O APIC Interrupt Source Override. {:#x} {:#x} {:#x} {:#x}", io_apic_source_interrupt_entry.bus_source, io_apic_source_interrupt_entry.irq_source, io_apic_source_interrupt_entry.global_system_interrupt, io_apic_source_interrupt_entry.flags);
+        }
+
         offset += entry_header.record_length as u64;
     }
-
-    PhysAddr(madt_header.local_apic_addr as u64)
+    result
 }
 
-pub fn read_xsdt(allocator: &mut FrameAllocator, rsdp_addr: u64) -> VirtAddr {
+pub struct ApicAddresses {
+    pub local_apic_addr: VirtAddr,
+    pub io_apic_addr: VirtAddr
+}
+
+pub fn read_xsdt(allocator: &mut FrameAllocator, rsdp_addr: u64) -> ApicAddresses {
     let xsdt_addr = get_xsdt_address(PhysAddr(rsdp_addr));
     log::info!("XSDT addr: {:#x}", xsdt_addr.0);
 
@@ -158,7 +204,7 @@ pub fn read_xsdt(allocator: &mut FrameAllocator, rsdp_addr: u64) -> VirtAddr {
         panic!("XSDT checksum failed");
     }
 
-    let mut local_apic_addr = PhysAddr(0);
+    let mut apic_addrs = ApicPhysAddrs { local_apic_addr:PhysAddr(0), io_apic_addr:PhysAddr(0)};
     for sdt_ptr in pointers_to_other_sdts {
         let header_ptr = (sdt_ptr + VIRT_MAPPING_OFFSET) as *const AcpiSdtHeader;
         let header = unsafe { header_ptr.as_ref().unwrap() };
@@ -168,16 +214,16 @@ pub fn read_xsdt(allocator: &mut FrameAllocator, rsdp_addr: u64) -> VirtAddr {
         };
         log::info!("Found SDT {}", s);
         if s == "APIC" {
-            local_apic_addr = handle_madt(header, VirtAddr::new_checked(sdt_ptr + VIRT_MAPPING_OFFSET + 36).unwrap());
+            apic_addrs = handle_madt(header, VirtAddr::new_checked(sdt_ptr + VIRT_MAPPING_OFFSET + 36).unwrap()).unwrap();
         }
     }
 
-    if local_apic_addr.0 == 0 {
+    if apic_addrs.local_apic_addr.0 == 0 {
         panic!("Failed to find local APIC");
     }
 
-    let mut apic_phys = local_apic_addr.0;
-    let mut apic_virt = VirtAddr::new(local_apic_addr.0 + VIRT_MAPPING_OFFSET);
+    let mut apic_phys = apic_addrs.local_apic_addr.0;
+    let mut apic_virt = VirtAddr::new(apic_addrs.local_apic_addr.0 + VIRT_MAPPING_OFFSET);
     let apic_virt_end = apic_virt.offset(0x10_0000)
         .expect("Failed to offset virtual address");
 
@@ -195,5 +241,16 @@ pub fn read_xsdt(allocator: &mut FrameAllocator, rsdp_addr: u64) -> VirtAddr {
         apic_phys += 4096;
     }
 
-    VirtAddr::new_checked(local_apic_addr.0 + VIRT_MAPPING_OFFSET).unwrap()
+    let io_apic_phys = apic_addrs.io_apic_addr.0 << 16; // hack. For some reason on qemu we need it
+    let io_apic_virt = VirtAddr::new(io_apic_phys + VIRT_MAPPING_OFFSET);
+
+    unsafe {
+        map_address_with_offset(l4_table, align_down(io_apic_virt), align_down_u64(io_apic_phys), allocator, VIRT_MAPPING_OFFSET)
+            .expect("Failed to map new frame");
+    }
+
+    ApicAddresses {
+        local_apic_addr: VirtAddr::new_checked(apic_addrs.local_apic_addr.0 + VIRT_MAPPING_OFFSET).unwrap(),
+        io_apic_addr: io_apic_virt
+    }
 }

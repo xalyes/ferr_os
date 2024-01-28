@@ -4,11 +4,10 @@ use crate::idt::{InterruptStackFrame, InterruptDescriptorTable, PageFaultErrorCo
 use lazy_static::lazy_static;
 use crate::gdt;
 use spin;
-use crate::pic::{ChainedPics, Port};
+use crate::port::Port;
 use crate::apic::Apic;
 
 pub const PIC_1_OFFSET: u8 = 32;
-pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
@@ -27,9 +26,6 @@ impl InterruptIndex {
         usize::from(self.as_u8())
     }
 }
-
-pub static PICS: spin::Mutex<ChainedPics> =
-    spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
 pub static APIC: spin::Mutex<Apic> =
     spin::Mutex::new(Apic::new());
@@ -92,8 +88,8 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     crate::task::keyboard::add_scancode(scancode);
 
     unsafe {
-        PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+        APIC.lock()
+            .notify_end_of_interrupt();
     }
 }
 

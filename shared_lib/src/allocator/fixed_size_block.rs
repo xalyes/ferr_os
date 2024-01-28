@@ -2,7 +2,6 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::{mem, ptr};
 use core::ptr::NonNull;
 use crate::allocator::Locked;
-use crate::serial_println;
 
 struct ListNode {
     next: Option<&'static mut ListNode>,

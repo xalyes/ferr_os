@@ -5,16 +5,13 @@
 extern crate alloc;
 extern crate shared_lib;
 
-use alloc::collections::VecDeque;
-use alloc::vec;
-use shared_lib::{BootInfo, serial_println, VIRT_MAPPING_OFFSET};
+use shared_lib::{BootInfo, VIRT_MAPPING_OFFSET};
 use shared_lib::entry_point;
 use rust_os::memory::active_level_4_table;
 
 use core::panic::PanicInfo;
 use shared_lib::logger;
 use core::arch::asm;
-use core::intrinsics::{black_box};
 use rust_os::allocator::init_heap;
 use rust_os::task::executor::Executor;
 use rust_os::task::{keyboard, Task, timer};
@@ -61,21 +58,16 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
 
     log::info!("Hello from kernel!");
 
-    for i in 0..300 {
-        log::info!("{}", i);
-    }
-    log::info!("Perf testing done");
-
     rust_os::init(&mut allocator, boot_info.rsdp_addr);
 
     let mut executor: Executor = Executor::new();
     executor.spawn(Task::new(ok_task()));
-    // TODO: executor.spawn(Task::new(keyboard::print_keypresses()));
+    executor.spawn(Task::new(keyboard::print_keypresses()));
     executor.spawn(Task::new(timer::timer_loop()));
 
     executor.run();
 
-    // todo ACPI shutdown
+    // TODO: ACPI shutdown
     log::info!("exited");
 
     loop {
