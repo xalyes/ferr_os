@@ -3,13 +3,20 @@
 import os
 import sys
 import subprocess
+import platform
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
-disk_image_result = subprocess.run(["cargo", "+stable", "run",
-"--package", "disk_image",
-"--target", "x86_64-unknown-linux-gnu",
-"--", current_dir + "/target/x86_64-unknown-uefi/release/loader.efi", sys.argv[1]])
+if (platform.system() == "Linux"):
+    disk_image_result = subprocess.run(["cargo", "+stable", "run",
+    "--package", "disk_image",
+    "--target", "x86_64-unknown-linux-gnu",
+    "--", current_dir + "/target/x86_64-unknown-uefi/release/loader.efi", sys.argv[1]])
+else:
+    disk_image_result = subprocess.run(["cargo", "+stable", "run",
+    "--package", "disk_image",
+    "--target", "x86_64-pc-windows-msvc",
+    "--", current_dir + "/target/x86_64-unknown-uefi/release/loader.efi", sys.argv[1]])
 
 if disk_image_result.returncode != 0:
     sys.exit(1)
