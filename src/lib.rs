@@ -13,10 +13,11 @@ use crate::xsdt::read_xsdt;
 pub mod idt;
 mod interrupts;
 pub mod gdt;
-mod port;
+pub mod port;
 pub mod memory;
 pub mod task;
 pub mod allocator;
+pub mod shell;
 mod apic;
 mod xsdt;
 

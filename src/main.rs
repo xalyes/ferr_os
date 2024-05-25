@@ -13,8 +13,10 @@ use core::panic::PanicInfo;
 use shared_lib::logger;
 use core::arch::asm;
 use rust_os::allocator::init_heap;
+use rust_os::shell::Shell;
 use rust_os::task::executor::Executor;
 use rust_os::task::{keyboard, Task, timer};
+use rust_os::port::Port;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -75,13 +77,18 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
 
     let mut executor: Executor = Executor::new();
     executor.spawn(Task::new(ok_task()));
-    executor.spawn(Task::new(keyboard::print_keypresses()));
     executor.spawn(Task::new(timer::timer_loop()));
+
+    let shell = Shell::new(fb_info);
+    executor.spawn(Task::new(keyboard::print_keypresses(shell)));
 
     executor.run();
 
     // TODO: ACPI shutdown
     log::info!("exited");
+
+    let mut shutdown_port = Port::new(0xB004);
+    unsafe { shutdown_port.write_u16(0x2000); };
 
     loop {
         unsafe {

@@ -23,6 +23,13 @@ impl Port {
     }
 
     #[inline]
+    pub unsafe fn write_u16(&mut self, value: u16) {
+        unsafe {
+            asm!("out dx, ax", in("dx") self.port, in("ax") value, options(nomem, nostack, preserves_flags));
+        }
+    }
+
+    #[inline]
     pub unsafe fn read(&mut self) -> u8 {
         let value: u8;
         unsafe {
