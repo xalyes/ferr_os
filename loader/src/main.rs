@@ -396,7 +396,7 @@ fn efi_main(image: uefi::Handle, mut system_table: uefi::table::SystemTable<uefi
 
     log::info!("This is a very simple UEFI bootloader");
 
-    let kernel_max_size = 40 * 4096;
+    let kernel_max_size = 100 * 4096;
     let kernel = load_kernel(image, &mut system_table, kernel_max_size)
         .expect("Failed to load kernel");
 

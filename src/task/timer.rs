@@ -4,6 +4,7 @@ use core::task::{Context, Poll};
 use conquer_once::spin::OnceCell;
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::task::AtomicWaker;
+use crate::apic::read_rtc;
 
 static TIMER_FLAG: OnceCell<AtomicBool> = OnceCell::uninit();
 static WAKER: AtomicWaker = AtomicWaker::new();
@@ -61,8 +62,8 @@ pub async fn timer_loop() {
     while let Some(()) = timer_stream.next().await {
         unsafe {
             static mut I: u64 = 0;
-            if I % 1000 == 0 {
-                log::info!("10 sec timer tick. {}", I / 1000);
+            if I % 100 == 0 {
+                log::info!("1 sec timer tick. {}. DateTime: {:?}", I / 100, read_rtc());
             }
             I += 1;
         }

@@ -7,6 +7,8 @@ use shared_lib::{get_tsc, read_u32_ptr, write_u32_ptr};
 use shared_lib::bits::{set_bit, set_bits};
 use crate::interrupts::InterruptIndex;
 use crate::xsdt::ApicAddresses;
+use chrono::{DateTime, TimeZone};
+use crate::memory::active_level_4_table;
 
 pub const APIC_APICID: u32     = 0x20;
 pub const APIC_APICVER: u32    = 0x30;
@@ -326,6 +328,91 @@ unsafe fn write_io_apic(io_apic: *mut u32, register: u32, value: u32) {
     write_u32_ptr(io_apic, 0x10, value);
 }
 
+pub fn read_rtc() -> DateTime<chrono::Utc> {
+    let mut century: u8;
+    let mut year: u8;
+    let mut month: u8;
+    let mut day: u8;
+    let mut hour: u8;
+    let mut minute: u8;
+    let mut second: u8;
+
+    let update_in_progress = || -> bool {
+        let mut cmos_control_port = Port::new(0x70);
+        let mut cmos_data_port = Port::new(0x71);
+
+        unsafe {
+            cmos_control_port.write(0x0A);
+            (cmos_data_port.read() & 0x80) != 0
+        }
+    };
+
+    let get_rtc_register = |reg: u8| -> u8 {
+        let mut cmos_control_port = Port::new(0x70);
+        let mut cmos_data_port = Port::new(0x71);
+
+        unsafe {
+            cmos_control_port.write(reg);
+            cmos_data_port.read()
+        }
+    };
+
+    while update_in_progress() {};
+
+    second = get_rtc_register(0x00);
+    minute = get_rtc_register(0x02);
+    hour = get_rtc_register(0x04);
+    day = get_rtc_register(0x07);
+    month = get_rtc_register(0x08);
+    year = get_rtc_register(0x09);
+    century = get_rtc_register(0x32);
+
+    loop {
+        let last_second = second;
+        let last_minute = minute;
+        let last_hour = hour;
+        let last_day = day;
+        let last_month = month;
+        let last_year = year;
+        let last_century = century;
+
+        while (update_in_progress()) {};
+
+        second = get_rtc_register(0x00);
+        minute = get_rtc_register(0x02);
+        hour = get_rtc_register(0x04);
+        day = get_rtc_register(0x07);
+        month = get_rtc_register(0x08);
+        year = get_rtc_register(0x09);
+        century = get_rtc_register(0x32);
+
+        if second == last_second && minute == last_minute && hour == last_hour
+            && day == last_day && month == last_month && year == last_year && century == last_century {
+            break
+        }
+    }
+
+    let register_b = get_rtc_register(0x0B);
+
+    // Convert BCD to binary values if necessary
+    if register_b & 0x04 == 0 {
+        second = (second & 0x0F) + ((second / 16) * 10);
+        minute = (minute & 0x0F) + ((minute / 16) * 10);
+        hour = ( (hour & 0x0F) + (((hour & 0x70) / 16) * 10) ) | (hour & 0x80);
+        day = (day & 0x0F) + ((day / 16) * 10);
+        month = (month & 0x0F) + ((month / 16) * 10);
+        year = (year & 0x0F) + ((year / 16) * 10);
+        century = (century & 0x0F) + ((century / 16) * 10);
+    }
+
+    // Convert 12-hour clock to 24-hour clock if necessary
+    if register_b & 0x02 == 0 && hour & 0x80 == 1 {
+        hour = ((hour & 0x7F) + 12) % 24;
+    }
+
+    chrono::Utc.with_ymd_and_hms(century as i32 * 100 + year as i32, month as u32, day as u32, hour as u32, minute as u32, second as u32).unwrap()
+}
+
 pub fn initialize_apic(apic_addrs: ApicAddresses) {
     unsafe { interrupts::APIC.lock().initialize(apic_addrs.local_apic_addr); };
 
@@ -336,30 +423,69 @@ pub fn initialize_apic(apic_addrs: ApicAddresses) {
         asm!(
         "mov ecx, 1bh; rdmsr; bts eax, 11; wrmsr", options(nomem, nostack)
         );
+        asm!("cli", options(nomem, nostack));
     }
 
     log::info!("APIC enabled");
 
     let apic_base = apic_addrs.local_apic_addr.0 as *mut u32;
 
+    let mut date_time = read_rtc();
+    log::info!("CMOS datetime: {:?}", date_time);
+
     unsafe {
+        write_u32_ptr(apic_base, APIC_TMRDIV, 0x03);
         write_u32_ptr(apic_base, APIC_SPURIOUS, read_u32_ptr(apic_base, APIC_SPURIOUS) | APIC_SW_ENABLE);
+    }
 
-        asm!("cli", options(nomem, nostack));
-        let cpu_khz = pit_hpet_ptimer_calibrate_cpu(apic_addrs.local_apic_addr);
-        log::info!("Detected CPU freq: {} Khz", cpu_khz);
+    let mut full_second_passing = false;
+    let mut first_measure = 0;
+    let mut second_measure = 0;
+    let mut third_measure = 0;
 
-        let timer_frequency = 100; // x interrupts per sec
-        let timer_value = (cpu_khz * 1000) / (16 * (timer_frequency));
+    loop {
+        let new_date_time = read_rtc();
+        if (date_time != new_date_time){
+            let ticks_in_1s = 0xFFFFFFFF - unsafe {
+                write_u32_ptr(apic_base, APIC_LVT_TMR, APIC_DISABLE);
+                read_u32_ptr(apic_base, APIC_TMRCURRCNT)
+            };
+            if !full_second_passing {
+                full_second_passing = true;
+            } else if first_measure == 0 {
+                first_measure = ticks_in_1s;
+            } else if second_measure == 0 {
+                second_measure = ticks_in_1s;
+            } else if third_measure == 0 {
+                third_measure = ticks_in_1s;
+            } else {
+                break;
+            }
 
-        log::info!("Ok. let's enable APIC with proper value. timer init value: {}, timer_frequency per sec: {}", timer_value, timer_frequency);
+            log::info!("New datetime: {:?}. Ticks elapsed: {}", new_date_time, ticks_in_1s);
+            date_time = new_date_time;
 
+            unsafe {
+                // one-shot mode
+                write_u32_ptr(apic_base, APIC_LVT_TMR, InterruptIndex::Timer as u32);
+                write_u32_ptr(apic_base, APIC_TMRINITCNT, 0xFFFFFFFF);
+            }
+        }
+    }
+
+    log::info!("In 1 second we had {} {} {} ticks", first_measure, second_measure, third_measure);
+    let avg_ticks = (first_measure as u64 + second_measure as u64 + third_measure as u64) / 3;
+    let bus_freq: u64 = avg_ticks * 16;
+    log::info!("CPU bus freq: {} Mhz", ((bus_freq / 1000) as f64) / 1000.0);
+
+    let timer_frequency = 100; // x interrupts per sec
+    let timer_value = avg_ticks / timer_frequency; // x interrupts per sec
+
+    log::info!("Ok. let's enable APIC with proper value. timer init value: {}, timer_frequency per sec: {}", timer_value, timer_frequency);
+
+    unsafe {
         write_u32_ptr(apic_base, APIC_TMRINITCNT, timer_value as u32);
         write_u32_ptr(apic_base, APIC_LVT_TMR, InterruptIndex::Timer as u32 | TMR_PERIODIC);
-
-        // setting divide value register again not needed by the manuals
-        // although I have found buggy hardware that required it
-        write_u32_ptr(apic_base, APIC_TMRDIV, 0x03);
 
         let local_apic_id = read_u32_ptr(apic_base, APIC_APICID);
 
@@ -369,7 +495,6 @@ pub fn initialize_apic(apic_addrs: ApicAddresses) {
 
         log::info!("IOAPIC[0]: version: {}, address: {:#x}", version as u8, apic_addrs.io_apic_addr.0);
         let mut low_reg = read_io_apic(io_apic_base, 0x12) as u64;
-
 
         set_bits(&mut low_reg, InterruptIndex::Keyboard as u64, 0);
 
@@ -385,5 +510,4 @@ pub fn initialize_apic(apic_addrs: ApicAddresses) {
         // enable hardware interrupts
         asm!("sti", options(nomem, nostack));
     }
-
 }
