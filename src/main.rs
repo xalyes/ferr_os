@@ -5,7 +5,7 @@
 extern crate alloc;
 extern crate shared_lib;
 
-use shared_lib::{BootInfo, VIRT_MAPPING_OFFSET};
+use shared_lib::{BootInfo, serial_logger, VIRT_MAPPING_OFFSET};
 use shared_lib::entry_point;
 use rust_os::memory::active_level_4_table;
 
@@ -21,7 +21,11 @@ fn panic(info: &PanicInfo) -> ! {
     unsafe {
         logger::LOGGER
             .get()
-            .map(|l| l.force_unlock())
+            .map(|l| l.force_unlock());
+
+        serial_logger::SERIAL_LOGGER
+            .get()
+            .map(|l| l.force_unlock());
     };
 
     log::error!("{}", info);
@@ -52,8 +56,17 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
         .expect("Failed to init heap");
 
     shared_lib::serial_println!("Creating logger");
-    let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(fb_info));
-    log::set_logger(logger).unwrap();
+
+    let logger_is_serial = true;
+
+    if logger_is_serial {
+        let logger = serial_logger::SERIAL_LOGGER.get_or_init(move || serial_logger::LockedSerialLogger::new());
+        log::set_logger(logger).unwrap();
+    } else {
+        let logger = logger::LOGGER.get_or_init(move || logger::LockedLogger::new(fb_info));
+        log::set_logger(logger).unwrap();
+    }
+
     log::set_max_level(log::LevelFilter::Debug);
 
     log::info!("Hello from kernel!");

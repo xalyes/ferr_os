@@ -15,6 +15,7 @@ pub mod addr;
 pub mod page_table;
 pub mod frame_allocator;
 pub mod allocator;
+pub mod serial_logger;
 
 use core::arch::asm;
 use core::panic::PanicInfo;
