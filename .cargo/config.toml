@@ -5,5 +5,5 @@ build-std-features = ["compiler-builtins-mem"]
 [build]
 target = "x86_64-default_settings.json"
 
+
 [target.'cfg(target_os = "none")']
-runner = "./package_kernel_and_run.py"
