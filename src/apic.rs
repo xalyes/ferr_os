@@ -8,7 +8,6 @@ use shared_lib::bits::{set_bit, set_bits};
 use crate::interrupts::InterruptIndex;
 use crate::xsdt::ApicAddresses;
 use chrono::{DateTime, TimeZone};
-use crate::memory::active_level_4_table;
 
 pub const APIC_APICID: u32     = 0x20;
 pub const APIC_APICVER: u32    = 0x30;
@@ -376,7 +375,7 @@ pub fn read_rtc() -> DateTime<chrono::Utc> {
         let last_year = year;
         let last_century = century;
 
-        while (update_in_progress()) {};
+        while update_in_progress() {};
 
         second = get_rtc_register(0x00);
         minute = get_rtc_register(0x02);
@@ -445,7 +444,7 @@ pub fn initialize_apic(apic_addrs: ApicAddresses) {
 
     loop {
         let new_date_time = read_rtc();
-        if (date_time != new_date_time){
+        if date_time != new_date_time {
             let ticks_in_1s = 0xFFFFFFFF - unsafe {
                 write_u32_ptr(apic_base, APIC_LVT_TMR, APIC_DISABLE);
                 read_u32_ptr(apic_base, APIC_TMRCURRCNT)

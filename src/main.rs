@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-#![feature(core_intrinsics)]
 extern crate alloc;
 extern crate shared_lib;
 

@@ -5,9 +5,15 @@
 extern crate shared_lib;
 extern crate alloc;
 
-use core::panic::PanicInfo;
-use core::arch::asm;
-use core::slice::{ from_raw_parts_mut, from_raw_parts };
+use core::{
+    panic::PanicInfo,
+    arch::asm,
+    ptr::addr_of,
+    slice::{
+        from_raw_parts_mut,
+        from_raw_parts
+    }
+};
 use uefi::prelude::entry;
 use uefi::proto::media::file::File;
 use uefi::table::boot::{OpenProtocolAttributes, OpenProtocolParams, AllocateType, MemoryType};
@@ -168,7 +174,7 @@ unsafe fn init_allocator(memory_map: uefi::table::boot::MemoryMap)
     }
     MMAP.next_free_entry_idx = (memory_map.entries().len()) as u64;
 
-    Ok((FrameAllocator::new(&MMAP, 0, 0), MMAP.clone()))
+    Ok((FrameAllocator::new(addr_of!(MMAP), 0, 0), MMAP.clone()))
 }
 
 #[derive(Copy, Clone)]

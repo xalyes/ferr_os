@@ -52,13 +52,13 @@ impl DerefMut for MemoryMap {
 
 #[repr(align(4096))]
 pub struct FrameAllocator {
-    memory_map: &'static MemoryMap,
+    memory_map: *const MemoryMap,
     pub next: usize,
     mapping_offset: u64
 }
 
 impl FrameAllocator {
-    pub fn new(memory_map: &'static MemoryMap, mapping_offset: u64, next_free_frame: usize) -> Self {
+    pub fn new(memory_map: *const MemoryMap, mapping_offset: u64, next_free_frame: usize) -> Self {
         FrameAllocator {
             memory_map,
             next: next_free_frame,
@@ -67,15 +67,17 @@ impl FrameAllocator {
     }
 
     fn usable_frames(&self) -> impl Iterator<Item = u64> + '_ {
-        // get usable regions from memory map
-        let regions = self.memory_map.iter();
-        let usable_regions = regions.filter(|r| r.ty == MemoryType::Free);
+        unsafe {
+            // get usable regions from memory map
+            let regions = (*self.memory_map).iter();
+            let usable_regions = regions.filter(|r| r.ty == MemoryType::Free);
 
-        // map each region to its address range
-        let addr_ranges = usable_regions.map(|r| r.addr..(r.addr + 4096 * r.page_count as u64));
+            // map each region to its address range
+            let addr_ranges = usable_regions.map(|r| r.addr..(r.addr + 4096 * r.page_count as u64));
 
-        // transform to an iterator of frame start addresses
-        addr_ranges.flat_map(|r| r.step_by(4096))
+            // transform to an iterator of frame start addresses
+            addr_ranges.flat_map(|r| r.step_by(4096))
+        }
     }
 
     pub fn allocate_frame(&mut self) -> Option<u64> {
