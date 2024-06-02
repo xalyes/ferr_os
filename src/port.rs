@@ -30,10 +30,26 @@ impl Port {
     }
 
     #[inline]
+    pub unsafe fn write_u32(&mut self, value: u32) {
+        unsafe {
+            asm!("out dx, eax", in("dx") self.port, in("eax") value, options(nomem, nostack, preserves_flags));
+        }
+    }
+
+    #[inline]
     pub unsafe fn read(&mut self) -> u8 {
         let value: u8;
         unsafe {
             asm!("in al, dx", out("al") value, in("dx") self.port, options(nomem, nostack, preserves_flags));
+        }
+        value
+    }
+
+    #[inline]
+    pub unsafe fn read_u32(&mut self) -> u32 {
+        let value: u32;
+        unsafe {
+            asm!("in eax, dx", out("eax") value, in("dx") self.port, options(nomem, nostack, preserves_flags));
         }
         value
     }

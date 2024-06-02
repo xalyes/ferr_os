@@ -20,6 +20,7 @@ pub mod allocator;
 pub mod shell;
 mod apic;
 mod xsdt;
+mod pci;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");
@@ -38,4 +39,5 @@ pub fn init(allocator: &mut FrameAllocator, rsdp_addr: u64) {
     let apic_addrs= read_xsdt(allocator, rsdp_addr);
     disable_pic();
     initialize_apic(apic_addrs);
+    pci::init_pci();
 }
