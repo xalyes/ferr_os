@@ -11,11 +11,13 @@ use rust_os::memory::active_level_4_table;
 use core::panic::PanicInfo;
 use shared_lib::logger;
 use core::arch::asm;
+use core::sync::atomic::{ AtomicU64, Ordering };
 use rust_os::allocator::init_heap;
 use rust_os::shell::Shell;
 use rust_os::task::executor::Executor;
-use rust_os::task::{keyboard, Task, timer};
+use rust_os::task::{keyboard, Task, timer::{timer_loop, sleep_for}};
 use rust_os::port::Port;
+use rust_os::chrono::read_rtc;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -75,11 +77,15 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     rust_os::init(&mut allocator, boot_info.rsdp_addr);
 
     let mut executor: Executor = Executor::new();
-    executor.spawn(Task::new(ok_task()));
-    executor.spawn(Task::new(timer::timer_loop()));
+
+    executor.spawn(Task::new(timer_loop()));
 
     let shell = Shell::new(fb_info);
     executor.spawn(Task::new(keyboard::print_keypresses(shell)));
+
+    executor.spawn(Task::new(print_every_sec_task()));
+
+    executor.spawn(Task::new(init_task()));
 
     executor.run();
 
@@ -96,11 +102,25 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     }
 }
 
-async fn async_number() -> u32 {
-    42
+pub async fn print_every_sec_task() {
+    loop {
+        sleep_for(1000).await;
+
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        log::info!("1 sec timer tick. {}. DateTime: {:?}", COUNTER.fetch_add(1, Ordering::Relaxed), read_rtc());
+    }
 }
 
-async fn ok_task() {
-    let number = async_number().await;
-    log::info!("Everything is ok. async number: {}", number);
+async fn init_task() {
+    log::info!("Init task started. Wait for 2 sec just for fun");
+    sleep_for(2000).await;
+
+    log::info!("Ok can continue init....");
+
+    for _i in 0..15 {
+        sleep_for(100).await;
+        log::info!("pum");
+    }
+
+    log::info!("Everything is ok.");
 }
