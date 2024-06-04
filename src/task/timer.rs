@@ -69,10 +69,12 @@ impl Stream for TimerStream {
     }
 }
 
+// TODO: move sleep future to another file and think about visibility. Only sleep_for has to be public, isn't it?
 pub struct TimerTasksManager {
     pub tasks: alloc::collections::BTreeMap<u64, (u64, AtomicWaker)>, // task id -> (ticks counter, waker)
 }
 
+// TODO: make it safe!
 pub static mut TIMER_TASKS_MANAGER: TimerTasksManager = TimerTasksManager{ tasks: BTreeMap::new() };
 
 impl TimerTasksManager {
