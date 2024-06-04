@@ -21,6 +21,7 @@ pub mod shell;
 mod apic;
 mod xsdt;
 mod pci;
+mod ide;
 pub mod chrono;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
