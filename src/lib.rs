@@ -21,6 +21,7 @@ pub mod shell;
 mod apic;
 mod xsdt;
 mod pci;
+mod ide;
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");

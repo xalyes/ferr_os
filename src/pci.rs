@@ -56,6 +56,8 @@ fn get_device_type(class_code: u8, subclass: u8, prog_if: u8) -> &'static str {
     ""
 }
 
+
+
 unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) {
     let [_bist, header_type] = pci_config_read_word(bus, device, func, 0xE).to_be_bytes();
     let [class_code, subclass] = pci_config_read_word(bus, device, func, 0xA).to_be_bytes();
@@ -73,6 +75,10 @@ unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) {
     } else {
         log::info!("[pci] {}device #{} - vendor: {:#x}, header_type: {:#x}, func: {}, device_type: {}", prefix, device, vendor_id, header_type, func, device_type_str);
     }
+
+    /*if class_code == 0x1 && subclass == 0x1 {
+        crate::ide::ide_initialize(prog_if);
+    }*/
 }
 
 unsafe fn check_device(bus: u8, device: u8) {

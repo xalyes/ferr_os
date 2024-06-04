@@ -8,6 +8,7 @@ use shared_lib::bits::{set_bit, set_bits};
 use crate::interrupts::InterruptIndex;
 use crate::xsdt::ApicAddresses;
 use chrono::{DateTime, TimeZone};
+use crate::task::timer;
 
 pub const APIC_APICID: u32     = 0x20;
 pub const APIC_APICVER: u32    = 0x30;
@@ -477,8 +478,8 @@ pub fn initialize_apic(apic_addrs: ApicAddresses) {
     let bus_freq: u64 = avg_ticks * 16;
     log::info!("CPU bus freq: {} Mhz", ((bus_freq / 1000) as f64) / 1000.0);
 
-    let timer_frequency = 100; // x interrupts per sec
-    let timer_value = avg_ticks / timer_frequency; // x interrupts per sec
+    let timer_frequency = timer::TIMER_FREQUENCY; // x interrupts per sec
+    let timer_value = avg_ticks / timer_frequency as u64; // x interrupts per sec
 
     log::info!("Ok. let's enable APIC with proper value. timer init value: {}, timer_frequency per sec: {}", timer_value, timer_frequency);
 
