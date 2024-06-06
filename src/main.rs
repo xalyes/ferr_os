@@ -4,7 +4,6 @@
 extern crate alloc;
 extern crate shared_lib;
 
-use alloc::collections::BTreeMap;
 use shared_lib::{BootInfo, serial_logger, VIRT_MAPPING_OFFSET};
 use shared_lib::entry_point;
 use rust_os::memory::active_level_4_table;
@@ -12,13 +11,13 @@ use rust_os::memory::active_level_4_table;
 use core::panic::PanicInfo;
 use shared_lib::logger;
 use core::arch::asm;
+use core::sync::atomic::{ AtomicU64, Ordering };
 use rust_os::allocator::init_heap;
 use rust_os::shell::Shell;
 use rust_os::task::executor::Executor;
-use rust_os::task::{keyboard, Task, timer};
+use rust_os::task::{keyboard, Task, timer::{timer_loop, sleep_for}};
 use rust_os::port::Port;
-use rust_os::task::timer::{Sleep, sleep_for, TIMER_FREQUENCY, TimerTasksManager};
-use core::borrow::BorrowMut;
+use rust_os::chrono::read_rtc;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -79,12 +78,12 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
 
     let mut executor: Executor = Executor::new();
 
-    executor.spawn(Task::new(timer::timer_loop()));
+    executor.spawn(Task::new(timer_loop()));
 
     let shell = Shell::new(fb_info);
     executor.spawn(Task::new(keyboard::print_keypresses(shell)));
 
-    executor.spawn(Task::new(timer::print_every_sec_task()));
+    executor.spawn(Task::new(print_every_sec_task()));
 
     executor.spawn(Task::new(init_task()));
 
@@ -103,13 +102,22 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     }
 }
 
+pub async fn print_every_sec_task() {
+    loop {
+        sleep_for(1000).await;
+
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        log::info!("1 sec timer tick. {}. DateTime: {:?}", COUNTER.fetch_add(1, Ordering::Relaxed), read_rtc());
+    }
+}
+
 async fn init_task() {
     log::info!("Init task started. Wait for 2 sec just for fun");
     sleep_for(2000).await;
 
     log::info!("Ok can continue init....");
 
-    for i in 0..10 {
+    for _i in 0..15 {
         sleep_for(100).await;
         log::info!("pum");
     }

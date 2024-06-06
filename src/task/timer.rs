@@ -1,18 +1,12 @@
 use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
-use alloc::vec::Vec;
-use core::cell::RefCell;
 use core::future::Future;
-use core::ops::{Deref, DerefMut, Sub};
+use core::ops::{DerefMut};
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use core::task::{Context, Poll, Waker};
 use conquer_once::spin::OnceCell;
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::task::AtomicWaker;
-use crate::apic::read_rtc;
-use core::borrow::BorrowMut;
-use crate::task::TaskId;
 
 static TIMER_FLAG: OnceCell<AtomicBool> = OnceCell::uninit();
 static WAKER: AtomicWaker = AtomicWaker::new();
@@ -22,25 +16,23 @@ pub const TIMER_FREQUENCY: u16 = 250;
 /// Called by the timer interrupt handler
 ///
 /// Must not block or allocate.
-pub(crate) fn raise_timer() {
+pub fn raise_timer() {
     if let Ok(bool_flag) = TIMER_FLAG.try_get() {
         bool_flag.store(true, Ordering::SeqCst);
         if Ok(true) == bool_flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst) {
             log::error!("[timer] raised timer flag hasn't been consumed last time!");
         }
         WAKER.wake();
-    } else {
-        //log::warn!("Timer flag uninitialized");
     }
 }
 
-pub struct TimerStream {
+struct TimerStream {
     _private: ()
 }
 
 impl TimerStream {
     pub fn new() -> Self {
-        crate::task::timer::TIMER_FLAG.try_init_once(|| AtomicBool::from(false))
+        TIMER_FLAG.try_init_once(|| AtomicBool::from(false))
             .expect("TimerStream::new should only be called once");
         TimerStream { _private: () }
     }
@@ -56,11 +48,11 @@ impl Stream for TimerStream {
             return Poll::Ready(Some(()))
         }
 
-        crate::task::timer::WAKER.register(&cx.waker());
+        WAKER.register(&cx.waker());
 
         match timer_flag.compare_exchange(true, false, Ordering::Acquire, Ordering::Relaxed) {
             Ok(true) => {
-                crate::task::timer::WAKER.take();
+                WAKER.take();
                 Poll::Ready(Some(()))
             },
             Ok(false) => Poll::Pending,
@@ -69,13 +61,11 @@ impl Stream for TimerStream {
     }
 }
 
-// TODO: move sleep future to another file and think about visibility. Only sleep_for has to be public, isn't it?
-pub struct TimerTasksManager {
-    pub tasks: alloc::collections::BTreeMap<u64, (u64, AtomicWaker)>, // task id -> (ticks counter, waker)
+struct TimerTasksManager {
+    tasks: BTreeMap<u64, (u64, AtomicWaker)>, // task id -> (ticks counter, waker)
 }
 
-// TODO: make it safe!
-pub static mut TIMER_TASKS_MANAGER: TimerTasksManager = TimerTasksManager{ tasks: BTreeMap::new() };
+static TIMER_TASKS_MANAGER: spin::Mutex<TimerTasksManager> = spin::Mutex::new(TimerTasksManager{ tasks: BTreeMap::new() });
 
 impl TimerTasksManager {
     pub fn register_task(&mut self, id: u64, ticks: u64) -> Result<(), &'static str> {
@@ -117,26 +107,11 @@ pub async fn timer_loop() {
     let mut timer_stream = TimerStream::new();
 
     while let Some(()) = timer_stream.next().await {
-        unsafe {
-            TIMER_TASKS_MANAGER.borrow_mut().decrement_all();
-        }
+        TIMER_TASKS_MANAGER.lock().decrement_all();
     }
 }
 
-pub async fn print_every_sec_task() {
-    loop {
-        sleep_for(1000).await;
-
-        unsafe {
-            static mut I: u64 = 1;
-            log::info!("1 sec timer tick. {}. DateTime: {:?}", I, read_rtc());
-            I += 1;
-        }
-    }
-
-}
-
-pub struct Sleep {
+struct Sleep {
     task_id: u64
 }
 
@@ -153,24 +128,27 @@ impl Sleep {
             sleep_for_ms / msec_freq
         };
 
-        unsafe {TIMER_TASKS_MANAGER.borrow_mut().register_task(id, timer_value).unwrap();}
+        TIMER_TASKS_MANAGER
+            .lock()
+            .register_task(id, timer_value)
+            .expect("Failed to register task");
 
         Sleep{ task_id: id }
     }
 }
 
-pub fn sleep_for(sleep_for_ms: u64) -> Sleep {
-    Sleep::new(sleep_for_ms)
+pub async fn sleep_for(sleep_for_ms: u64) {
+    Sleep::new(sleep_for_ms).await;
 }
 
 impl Future for Sleep {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if unsafe { TIMER_TASKS_MANAGER.borrow_mut().check_task(self.task_id).unwrap() } {
+        if TIMER_TASKS_MANAGER.lock().check_task(self.task_id).expect("Failed to check task") {
             Poll::Ready(())
         } else {
-            unsafe {TIMER_TASKS_MANAGER.borrow_mut().register_waker(self.task_id, &cx.waker()).unwrap();}
+            TIMER_TASKS_MANAGER.lock().register_waker(self.task_id, &cx.waker()).expect("Failed to register waker");
             Poll::Pending
         }
     }
