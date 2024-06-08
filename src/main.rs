@@ -74,7 +74,9 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
 
     log::info!("Hello from kernel!");
 
-    rust_os::init(&mut allocator, boot_info.rsdp_addr);
+    rust_os::preinit(&mut allocator, boot_info.rsdp_addr);
+
+    log::info!("Preinit done");
 
     let mut executor: Executor = Executor::new();
 
@@ -86,6 +88,8 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
     executor.spawn(Task::new(print_every_sec_task()));
 
     executor.spawn(Task::new(init_task()));
+
+    executor.spawn(Task::new(rust_os::init()));
 
     executor.run();
 

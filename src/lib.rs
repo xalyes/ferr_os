@@ -35,11 +35,14 @@ pub fn test_panic_handler(info: &PanicInfo) -> ! {
     }
 }
 
-pub fn init(allocator: &mut FrameAllocator, rsdp_addr: u64) {
+pub fn preinit(allocator: &mut FrameAllocator, rsdp_addr: u64) {
     gdt::init();
     interrupts::init_idt();
     let apic_addrs= read_xsdt(allocator, rsdp_addr);
     disable_pic();
     initialize_apic(apic_addrs);
-    pci::init_pci();
+}
+
+pub async fn init() {
+    pci::init_pci().await;
 }

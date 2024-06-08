@@ -4,6 +4,7 @@ use crate::idt::{InterruptStackFrame, InterruptDescriptorTable, PageFaultErrorCo
 use lazy_static::lazy_static;
 use crate::gdt;
 use spin;
+use shared_lib::serial_logger::SERIAL_LOGGER;
 use crate::port::Port;
 use crate::apic::Apic;
 
@@ -98,10 +99,15 @@ extern "x86-interrupt" fn page_fault_handler(
     error_code: PageFaultErrorCode,
 ) {
     unsafe {
-        shared_lib::logger::LOGGER
-            .get()
-            .map(|l| l.force_unlock())
-    };
+        if shared_lib::logger::LOGGER.is_initialized() {
+            shared_lib::logger::LOGGER
+                .get()
+                .map(|l| l.force_unlock())
+                .unwrap()
+        } else if SERIAL_LOGGER.is_initialized() {
+            SERIAL_LOGGER.get().map(|l| l.force_unlock()).unwrap()
+        }
+    }
 
     log::info!("EXCEPTION: PAGE FAULT");
 

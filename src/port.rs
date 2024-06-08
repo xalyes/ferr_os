@@ -46,6 +46,15 @@ impl Port {
     }
 
     #[inline]
+    pub unsafe fn read_u16(&mut self) -> u16 {
+        let value: u16;
+        unsafe {
+            asm!("in ax, dx", out("ax") value, in("dx") self.port, options(nomem, nostack, preserves_flags));
+        }
+        value
+    }
+
+    #[inline]
     pub unsafe fn read_u32(&mut self) -> u32 {
         let value: u32;
         unsafe {
@@ -70,3 +79,4 @@ pub unsafe fn read(port: u16) -> u8 {
     }
     value
 }
+

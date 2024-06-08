@@ -58,7 +58,7 @@ fn get_device_type(class_code: u8, subclass: u8, prog_if: u8) -> &'static str {
 
 
 
-unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) {
+async unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) {
     let [_bist, header_type] = pci_config_read_word(bus, device, func, 0xE).to_be_bytes();
     let [class_code, subclass] = pci_config_read_word(bus, device, func, 0xA).to_be_bytes();
     let [prog_if, _revision_id] = pci_config_read_word(bus, device, func, 0x8).to_be_bytes();
@@ -77,11 +77,11 @@ unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) {
     }
 
     if class_code == 0x1 && subclass == 0x1 {
-        crate::ide::ide_initialize(prog_if);
+        crate::ide::ide_initialize(prog_if).await;
     }
 }
 
-unsafe fn check_device(bus: u8, device: u8) {
+async unsafe fn check_device(bus: u8, device: u8) {
     let vendor_id = pci_config_read_word(bus, device, 0, 0);
 
     // device doesn't exist
@@ -98,17 +98,16 @@ unsafe fn check_device(bus: u8, device: u8) {
         for func in 1..8 {
             let vendor_id = pci_config_read_word(bus, device, func, 0);
             if vendor_id != 0xFFFF {
-                check_function(bus, device, func, vendor_id);
+                check_function(bus, device, func, vendor_id).await;
             }
         }
         return;
     }
 
-    check_function(bus, device, 0, vendor_id);
+    check_function(bus, device, 0, vendor_id).await;
 }
 
-pub fn init_pci() {
-
+pub async fn init_pci() {
     unsafe {
         let [_bist, header_type] = pci_config_read_word(0, 0, 0, 0xE).to_be_bytes();
 
@@ -116,7 +115,7 @@ pub fn init_pci() {
             // Single PCI host controller
             // checking bus #0
             for device in 0..32 {
-                check_device(0, device);
+                check_device(0, device).await;
             }
         } else {
             // Multiple PCI host controllers
