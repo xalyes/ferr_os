@@ -114,6 +114,22 @@ enum AtaStatus {
     Error              = 0x01,
 }
 
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Debug)]
+enum AtaError {
+    NoError = 0,
+    DeviceFault = 19,
+    NoAddressMarkFound = 7, // 'Track 0 not found' or 'Media change request' or 'Media changed'
+    NoMediaOrMediaError = 3,
+    CommandAborted = 20,
+    IdMarkNotFound = 21,
+    UncorrectableDataError = 22,
+    BadSectors = 13,
+    ReadsNothing = 23,
+    WriteProtected = 8,
+}
+
 static mut CHANNELS: [IDEChannelRegister; 2] = [IDEChannelRegister{ io_base: 0, ctrl: 0, bm_ide: 0, no_interrupt: 0 }; 2];
 
 unsafe fn ide_write(channel: ATAChannel, reg: AtaRegister, data: u8) {
@@ -252,7 +268,6 @@ pub(crate) async fn ide_initialize(_prog_if: u8) -> Vec<IDEDevice> {
 
                 loop {
                     status = ide_read(channel, AtaRegister::CommandAndStatus);
-                    log::info!("status: {}", status);
                     if (status & AtaStatus::Error as u8) != 0 {
                         err = 1;
                         break; // Device is not ATA
@@ -320,4 +335,172 @@ pub(crate) async fn ide_initialize(_prog_if: u8) -> Vec<IDEDevice> {
         }
     }
     drives
+}
+
+unsafe fn ide_polling(channel: ATAChannel, advanced_check: bool) -> AtaError {
+    // Delay 400 nanosecond for BSY to be set:
+    for _ in 0..4 {
+        // Reading the Alternate Status port wastes 100ns; loop four times.
+        ide_read(channel, AtaRegister::ControlAndAltStatus);
+    }
+
+    while (ide_read(channel, AtaRegister::CommandAndStatus) & AtaStatus::Busy as u8) != 0 {}
+
+    if advanced_check {
+        let status = ide_read(channel, AtaRegister::CommandAndStatus);
+
+        if (status & AtaStatus::Error as u8) != 0 {
+            let err = ide_read(channel, AtaRegister::ErrorAndFeatures);
+
+            if (err & 0x01) != 0  { return AtaError::NoAddressMarkFound; }
+            if (err & 0x02) != 0  { return AtaError::NoMediaOrMediaError; }
+            if (err & 0x04) != 0  { return AtaError::CommandAborted; }
+            if (err & 0x08) != 0  { return AtaError::NoMediaOrMediaError; }
+            if (err & 0x10) != 0  { return AtaError::IdMarkNotFound; }
+            if (err & 0x20) != 0  { return AtaError::NoMediaOrMediaError; }
+            if (err & 0x40) != 0  { return AtaError::UncorrectableDataError; }
+            if (err & 0x80) != 0  { return AtaError::BadSectors; }
+
+            return AtaError::DeviceFault;
+        }
+
+        if (status & AtaStatus::DriveWriteFault as u8) != 0 {
+            return AtaError::DeviceFault;
+        }
+
+        // BSY = 0; DF = 0; ERR = 0 so we should check for DRQ now.
+        /*if (status & AtaStatus::DataRequestReady as u8) != 0 {
+            return AtaError::ReadsNothing; // DRQ should be set
+        }*/
+    }
+
+    return AtaError::NoError;
+}
+
+enum LbaMode {
+    Lba48,
+    Lba28,
+    Chs
+}
+
+impl IDEDevice {
+    unsafe fn read(&self, lba: u32, numsects: u8) -> Result<Vec<[u16; 256]>, AtaError> {
+        CHANNELS[self.channel as usize].no_interrupt = 0x02;
+        ide_write(self.channel, AtaRegister::ControlAndAltStatus, CHANNELS[self.channel as usize].no_interrupt);
+
+        let lba_mode;
+        let mut lba_io = [0u8; 6];
+        let head: u8;
+        if lba >= 0x10000000 { // with this lba drive must support LBA48
+            // LBA48
+            lba_mode = LbaMode::Lba48;
+            lba_io[0] = ((lba & 0x000000FF) >> 0) as u8;
+            lba_io[1] = ((lba & 0x0000FF00) >> 8) as u8;
+            lba_io[2] = ((lba & 0x00FF0000) >> 16) as u8;
+            lba_io[3] = ((lba & 0xFF000000) >> 24) as u8;
+            lba_io[4] = 0; // These Registers are not used here.
+            lba_io[5] = 0; // These Registers are not used here.
+            head = 0;      // Lower 4-bits of HDDEVSEL are not used here.
+
+        } else if (self.capabilities & 0x200) != 0 {
+            // LBA28
+            lba_mode = LbaMode::Lba28;
+            lba_io[0] = ((lba & 0x000000FF) >> 0) as u8;
+            lba_io[1] = ((lba & 0x0000FF00) >> 8) as u8;
+            lba_io[2] = ((lba & 0x00FF0000) >> 16) as u8;
+            lba_io[3] = 0; // These Registers are not used here.
+            lba_io[4] = 0; // These Registers are not used here.
+            lba_io[5] = 0; // These Registers are not used here.
+            head = ((lba & 0xF000000) >> 24) as u8;
+        } else {
+            // CHS
+            lba_mode = LbaMode::Chs;
+            unimplemented!();
+        }
+
+        // DMA is not implemented for now
+        let dma = false;
+
+        // wait if busy
+        while (ide_read(self.channel, AtaRegister::CommandAndStatus) & AtaStatus::Busy as u8) != 0 {}
+
+        let slavebit: u8 = match self.drive { DriveType::Master => 0b0000, DriveType::Slave => 0b10000 };
+        match lba_mode {
+            LbaMode::Chs => unimplemented!(),
+            LbaMode::Lba28 => {
+                ide_write(self.channel, AtaRegister::HddEvSel, 0xE0 | slavebit | head);
+            }
+            LbaMode::Lba48 => {
+                ide_write(self.channel, AtaRegister::HddEvSel, 0xE0 | slavebit | head);
+
+                ide_write(self.channel, AtaRegister::SecCount1,   0);
+                ide_write(self.channel, AtaRegister::Lba3,   lba_io[3]);
+                ide_write(self.channel, AtaRegister::Lba4,   lba_io[4]);
+                ide_write(self.channel, AtaRegister::Lba5,   lba_io[5]);
+            }
+        }
+        ide_write(self.channel, AtaRegister::SecCount0,   numsects);
+        ide_write(self.channel, AtaRegister::Lba0,   lba_io[0]);
+        ide_write(self.channel, AtaRegister::Lba1,   lba_io[1]);
+        ide_write(self.channel, AtaRegister::Lba2,   lba_io[2]);
+
+        let command = match lba_mode {
+            LbaMode::Chs => unimplemented!(),
+            LbaMode::Lba28 => {
+                if dma {
+                    AtaCommand::ReadDma
+                } else {
+                    AtaCommand::ReadPio
+                }
+            }
+            LbaMode::Lba48 => {
+                if dma {
+                    AtaCommand::ReadDmaExt
+                } else {
+                    AtaCommand::ReadPioExt
+                }
+            }
+        };
+        ide_write(self.channel, AtaRegister::CommandAndStatus, command as u8);
+
+        if dma {
+            unimplemented!();
+        } else {
+            let mut port = Port::new(CHANNELS[self.channel as usize].io_base);
+
+            let mut buffer = [0u16; 256];
+            let mut result = Vec::new();
+            result.reserve(numsects as usize);
+
+            for _ in 0..numsects {
+                let err = ide_polling(self.channel, true);
+                match err {
+                    AtaError::NoError => {
+                        for i in 0..256 {
+                            let word = port.read_u16().swap_bytes();
+                            buffer[i] = word;
+                        }
+                        result.push(buffer.clone());
+                    },
+                    _ => { return Err(err); }
+                }
+            }
+
+            return Ok(result);
+        }
+    }
+
+    pub fn read_from_1st_sector(&self) {
+        unsafe {
+            let result = self.read(0x0, 2);
+
+            let vec_read = result.expect("Failed to read from drive");
+            for (idx, sector) in vec_read.iter().enumerate() {
+                for i in 0..32 {
+                    log::info!("{:#x}: {:#06x} {:#06x} {:#06x} {:#06x} {:#06x} {:#06x} {:#06x} {:#06x}", i*8*2 + idx*0x200,
+                        sector[i*8], sector[i*8 + 1], sector[i*8 + 2], sector[i*8 + 3], sector[i*8 + 4], sector[i*8 + 5], sector[i*8 + 6], sector[i*8 + 7]);
+                }
+            }
+        }
+    }
 }
