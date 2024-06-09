@@ -8,6 +8,7 @@ use core::panic::PanicInfo;
 use shared_lib::frame_allocator::FrameAllocator;
 use shared_lib::serial_println;
 use crate::apic::{disable_pic, initialize_apic};
+use crate::pci::PciDevice::{Drive, Generic};
 use crate::xsdt::read_xsdt;
 
 pub mod idt;
@@ -44,5 +45,20 @@ pub fn preinit(allocator: &mut FrameAllocator, rsdp_addr: u64) {
 }
 
 pub async fn init() {
-    pci::init_pci().await;
+    let pci_devices = pci::init_pci().await;
+
+    for pci_device in pci_devices {
+        match pci_device {
+            Drive(drive) => {
+                log::info!("[pci] Found {:?} drive on {:?} channel. Size: {} kB. Model: {}",
+                    drive.drive,
+                    drive.channel,
+                    (drive.size * 512) / 1024,
+                    core::str::from_utf8(&drive.model).expect("IDE drive model string is not utf-8"));
+            },
+            Generic(device) => {
+                log::info!("[pci] device: {:?}", device);
+            }
+        }
+    }
 }

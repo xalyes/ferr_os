@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use crate::port;
 use crate::port::Port;
 use crate::task::timer::sleep_for;
@@ -11,13 +12,13 @@ struct IDEChannelRegister {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum ATAChannel {
+pub enum ATAChannel {
     Primary = 0x0,
     Secondary = 0x1
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum IDEInterfaceType {
     Ata = 0x00,
     Atapi = 0x01
@@ -25,22 +26,23 @@ enum IDEInterfaceType {
 
 
 #[derive(Clone, Copy, Debug)]
-enum DriveType {
+pub enum DriveType {
     Master = 0x0,
     Slave = 0x1
 }
 
-#[derive(Clone, Copy)]
-struct IDEDevice {
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub struct IDEDevice {
     reserved: bool,          // false (Empty) or true (This Drive really exists).
-    channel: ATAChannel,
-    drive: DriveType,        // Master or Slave
+    pub channel: ATAChannel,
+    pub drive: DriveType,        // Master or Slave
     interface_type: IDEInterfaceType,      // 0: ATA, 1:ATAPI.
     signature: u16,   // Drive Signature
     capabilities: u16, // Features.
     command_sets: u32, // Command Sets Supported.
-    size: u32,        // Size in Sectors.
-    model: [u8; 41],   // Model in string.
+    pub size: u32,        // Size in Sectors.
+    pub model: [u8; 41],   // Model in string.
     enabled_48bit: bool // 48 bit addressing supported
 }
 
@@ -200,7 +202,7 @@ fn get_u32_from_buffer(buffer: [u16; 1024], offset: IdentifyBufferOffset) -> u32
     construct_u32(buffer[offset as usize .. offset as usize + 2].try_into().unwrap())
 }
 
-pub(crate) async fn ide_initialize(_prog_if: u8) {
+pub(crate) async fn ide_initialize(_prog_if: u8) -> Vec<IDEDevice> {
     log::info!("IDE initializing");
     // IDE compatibility mode constants
     let bar0: u32 = 0x1F0;
@@ -224,21 +226,9 @@ pub(crate) async fn ide_initialize(_prog_if: u8) {
         ide_write(ATAChannel::Primary, AtaRegister::ControlAndAltStatus, 2);
         ide_write(ATAChannel::Secondary, AtaRegister::ControlAndAltStatus, 2);
     }
-    
-    let mut drives: [IDEDevice; 4] = [IDEDevice{
-        reserved: false,
-        channel: ATAChannel::Primary,
-        drive: DriveType::Master,
-        interface_type: IDEInterfaceType::Ata,
-        signature: 0,
-        capabilities: 0,
-        command_sets: 0,
-        size: 0,
-        model: [0; 41],
-        enabled_48bit: false,
-    }; 4];
 
-    let mut drives_num = 0;
+    let mut drives = Vec::new();
+
     for channel in [ATAChannel::Primary, ATAChannel::Secondary] {
         for drive in [DriveType::Master, DriveType::Slave] {
             log::info!("Checking {:?} {:?}", channel, drive);
@@ -247,7 +237,6 @@ pub(crate) async fn ide_initialize(_prog_if: u8) {
             let interface_type = IDEInterfaceType::Ata;
             let mut status: u8;
 
-            drives[drives_num].reserved = false;
             unsafe {
                 ide_write(channel, AtaRegister::HddEvSel, 0xA0 | ((drive as u8) << 4));
             }
@@ -259,7 +248,7 @@ pub(crate) async fn ide_initialize(_prog_if: u8) {
             sleep_for(1).await;
 
             unsafe {
-                if ide_read(channel, AtaRegister::CommandAndStatus) == 0 { drives_num += 1; continue; } // No Device
+                if ide_read(channel, AtaRegister::CommandAndStatus) == 0 { continue; } // No Device
 
                 loop {
                     status = ide_read(channel, AtaRegister::CommandAndStatus);
@@ -275,7 +264,6 @@ pub(crate) async fn ide_initialize(_prog_if: u8) {
 
                 if err != 0 {
                     // It's a place to probe for ATAPI Devices, but I don't want it
-                    drives_num += 1;
                     continue;
                 }
             }
@@ -286,41 +274,50 @@ pub(crate) async fn ide_initialize(_prog_if: u8) {
                 ide_read_buffer(channel, AtaRegister::Data, 256, &mut ide_buf);
             }
 
-            drives[drives_num].reserved = true;
-            drives[drives_num].interface_type = interface_type;
-            drives[drives_num].channel = channel;
-            drives[drives_num].drive = drive;
-            drives[drives_num].signature = get_u16_from_buffer(ide_buf, IdentifyBufferOffset::DeviceType);
-            drives[drives_num].capabilities = get_u16_from_buffer(ide_buf, IdentifyBufferOffset::Capabilities);
-            drives[drives_num].command_sets = get_u32_from_buffer(ide_buf, IdentifyBufferOffset::Commandsets);
+            let command_sets = get_u32_from_buffer(ide_buf, IdentifyBufferOffset::Commandsets);
+            let size: u32;
+            let mut model: [u8; 41] = [0; 41];
+            let enabled_48bit: bool;
 
-            if drives[drives_num].command_sets & (1 << 26) != 0 {
+            if command_sets & (1 << 26) != 0 {
                 // Device uses 48-Bit Addressing:
-                drives[drives_num].enabled_48bit = true;
-                drives[drives_num].size = get_u32_from_buffer(ide_buf, IdentifyBufferOffset::MaxLbaExt);
+                enabled_48bit = true;
+                size = get_u32_from_buffer(ide_buf, IdentifyBufferOffset::MaxLbaExt);
             } else {
                 // Device uses CHS or 28-bit Addressing:
-                drives[drives_num].enabled_48bit = false;
-                drives[drives_num].size = get_u32_from_buffer(ide_buf, IdentifyBufferOffset::MaxLba);
+                enabled_48bit = false;
+                size = get_u32_from_buffer(ide_buf, IdentifyBufferOffset::MaxLba);
             }
 
             let mut i: usize = 0;
             while i < 40 {
                 let chars: [u8; 2] = ide_buf[IdentifyBufferOffset::Model as usize + i / 2].to_be_bytes();
 
-                drives[drives_num].model[i] = chars[0];
-                drives[drives_num].model[i + 1] = chars[1];
+                model[i] = chars[0];
+                model[i + 1] = chars[1];
                 i += 2;
             }
-            drives[drives_num].model[40] = 0;
+            model[40] = 0;
 
-            drives_num += 1;
+            drives.push(IDEDevice {
+                reserved: true,
+                channel,
+                drive,
+                interface_type,
+                signature: get_u16_from_buffer(ide_buf, IdentifyBufferOffset::DeviceType),
+                capabilities: get_u16_from_buffer(ide_buf, IdentifyBufferOffset::Capabilities),
+                command_sets,
+                size,
+                model,
+                enabled_48bit,
+            });
         }
     }
 
-    for i in 0..drives_num {
-        if drives[i].reserved == true {
-            log::info!(" Found ATA Drive {} kB - '{}'. 48-bit addressing: {}", (drives[i].size * 512) / 1024, core::str::from_utf8(&drives[i].model).unwrap(), drives[i].enabled_48bit);
+    for drive in &drives {
+        if drive.reserved == true {
+            log::info!("Found ATA Drive {} kB - '{}'. 48-bit addressing: {}", (drive.size * 512) / 1024, core::str::from_utf8(&drive.model).unwrap(), drive.enabled_48bit);
         }
     }
+    drives
 }

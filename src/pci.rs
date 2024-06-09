@@ -1,3 +1,7 @@
+use alloc::vec;
+use alloc::vec::Vec;
+use crate::ide::IDEDevice;
+use crate::pci::PciDevice::Drive;
 use crate::port::Port;
 
 unsafe fn pci_config_read_word(bus: u8, device: u8, func: u8, offset: u8) -> u16 {
@@ -56,9 +60,26 @@ fn get_device_type(class_code: u8, subclass: u8, prog_if: u8) -> &'static str {
     ""
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct GenericPciDevice {
+    bus: u8,
+    device: u8,
+    function: u8,
 
+    class_code: u8,
+    subclass: u8,
+    prog_if: u8,
+    vendor_id: u16
+}
 
-async unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) {
+#[derive(Debug)]
+pub enum PciDevice {
+    Drive(IDEDevice),
+    Generic(GenericPciDevice)
+}
+
+async unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) -> Vec<PciDevice> {
     let [_bist, header_type] = pci_config_read_word(bus, device, func, 0xE).to_be_bytes();
     let [class_code, subclass] = pci_config_read_word(bus, device, func, 0xA).to_be_bytes();
     let [prog_if, _revision_id] = pci_config_read_word(bus, device, func, 0x8).to_be_bytes();
@@ -77,16 +98,18 @@ async unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) {
     }
 
     if class_code == 0x1 && subclass == 0x1 {
-        crate::ide::ide_initialize(prog_if).await;
+        let drives = crate::ide::ide_initialize(prog_if).await;
+        return drives.into_iter().map(Drive).collect();
     }
+    vec![PciDevice::Generic(GenericPciDevice{ bus, device, function: func, class_code, subclass, prog_if, vendor_id })]
 }
 
-async unsafe fn check_device(bus: u8, device: u8) {
+async unsafe fn check_device(bus: u8, device: u8) -> Vec<PciDevice> {
     let vendor_id = pci_config_read_word(bus, device, 0, 0);
 
     // device doesn't exist
     if vendor_id == 0xFFFF {
-        return;
+        return Vec::new();
     }
     let [_bist, header_type] = pci_config_read_word(bus, device, 0, 0xE).to_be_bytes();
 
@@ -95,19 +118,21 @@ async unsafe fn check_device(bus: u8, device: u8) {
         let [class_code, subclass] = pci_config_read_word(bus, device, 0, 0xA).to_be_bytes();
         log::info!("[pci] multifunction device #{} - vendor: {:#x}, header_type: {:#x}, device_type: {}", device, vendor_id, header_type, get_device_type(class_code, subclass, 0));
 
+        let mut vec = Vec::new();
         for func in 1..8 {
             let vendor_id = pci_config_read_word(bus, device, func, 0);
             if vendor_id != 0xFFFF {
-                check_function(bus, device, func, vendor_id).await;
+                vec.append(&mut check_function(bus, device, func, vendor_id).await);
             }
         }
-        return;
+        return vec;
     }
 
-    check_function(bus, device, 0, vendor_id).await;
+    check_function(bus, device, 0, vendor_id).await
 }
 
-pub async fn init_pci() {
+pub async fn init_pci() -> Vec<PciDevice> {
+    let mut vec = Vec::new();
     unsafe {
         let [_bist, header_type] = pci_config_read_word(0, 0, 0, 0xE).to_be_bytes();
 
@@ -115,11 +140,12 @@ pub async fn init_pci() {
             // Single PCI host controller
             // checking bus #0
             for device in 0..32 {
-                check_device(0, device).await;
+                vec.append(&mut check_device(0, device).await);
             }
         } else {
             // Multiple PCI host controllers
             unimplemented!();
         }
     }
+    vec
 }
