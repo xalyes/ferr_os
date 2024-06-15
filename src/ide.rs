@@ -45,6 +45,21 @@ pub struct IDEDevice {
     enabled_48bit: bool // 48 bit addressing supported
 }
 
+#[allow(dead_code)]
+pub trait BlockDevice {
+    fn read(&self, lba: u32, num: u8) -> Result<Vec<[u16; 256]>, AtaError>;
+
+    fn write(&self, lba: u32, data: Vec<[u16; 256]>) -> Result<(), AtaError>;
+
+    fn size(&self) -> u32;
+
+    fn model(&self) -> [u8; 41];
+
+    fn channel(&self) -> ATAChannel;
+
+    fn drive_type(&self) -> DriveType;
+}
+
 #[repr(usize)]
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
@@ -117,7 +132,7 @@ enum AtaStatus {
 #[repr(u8)]
 #[allow(dead_code)]
 #[derive(Debug)]
-enum AtaError {
+pub enum AtaError {
     NoError = 0,
     DeviceFault = 19,
     NoAddressMarkFound = 7, // 'Track 0 not found' or 'Media change request' or 'Media changed'
@@ -220,7 +235,7 @@ fn get_u32_from_buffer(buffer: [u16; 1024], offset: IdentifyBufferOffset) -> u32
     construct_u32(buffer[offset as usize .. offset as usize + 2].try_into().unwrap())
 }
 
-pub(crate) async fn ide_initialize(_prog_if: u8) -> Vec<IDEDevice> {
+pub(crate) async fn ide_initialize(_prog_if: u8) -> Vec<impl BlockDevice> {
     log::info!("IDE initializing");
     // IDE compatibility mode constants
     let bar0: u32 = 0x1F0;
@@ -526,8 +541,18 @@ impl IDEDevice {
             return Ok(result);
         }
     }
+}
 
-    pub fn write(&self, lba: u32, data: Vec<[u16; 256]>) -> Result<(), AtaError> {
+impl BlockDevice for IDEDevice {
+    fn read(&self, lba: u32, num: u8) -> Result<Vec<[u16; 256]>, AtaError> {
+        if lba + num as u32 > self.size {
+            return Err(AtaError::OutOfRange);
+        }
+
+        unsafe { self.read_impl(lba, num) }
+    }
+
+    fn write(&self, lba: u32, data: Vec<[u16; 256]>) -> Result<(), AtaError> {
         if lba + data.len() as u32 > self.size {
             return Err(AtaError::OutOfRange);
         }
@@ -535,11 +560,19 @@ impl IDEDevice {
         unsafe { self.write_impl(lba, data) }
     }
 
-    pub fn read(&self, lba: u32, num: u8) -> Result<Vec<[u16; 256]>, AtaError> {
-        if lba + num as u32 > self.size {
-            return Err(AtaError::OutOfRange);
-        }
+    fn size(&self) -> u32 {
+        self.size
+    }
 
-        unsafe { self.read_impl(lba, num) }
+    fn model(&self) -> [u8; 41] {
+        self.model
+    }
+
+    fn channel(&self) -> ATAChannel {
+        self.channel
+    }
+
+    fn drive_type(&self) -> DriveType {
+        self.drive
     }
 }

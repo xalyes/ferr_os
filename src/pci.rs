@@ -1,6 +1,7 @@
+use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use crate::ide::IDEDevice;
+use crate::ide::BlockDevice;
 use crate::pci::PciDevice::Drive;
 use crate::port::Port;
 
@@ -73,9 +74,8 @@ pub struct GenericPciDevice {
     vendor_id: u16
 }
 
-#[derive(Debug)]
 pub enum PciDevice {
-    Drive(IDEDevice),
+    Drive(Box<dyn BlockDevice>),
     Generic(GenericPciDevice)
 }
 
@@ -99,7 +99,7 @@ async unsafe fn check_function(bus: u8, device: u8, func: u8, vendor_id: u16) ->
 
     if class_code == 0x1 && subclass == 0x1 {
         let drives = crate::ide::ide_initialize(prog_if).await;
-        return drives.into_iter().map(Drive).collect();
+        return drives.into_iter().map(|a|Drive(Box::new(a))).collect();
     }
     vec![PciDevice::Generic(GenericPciDevice{ bus, device, function: func, class_code, subclass, prog_if, vendor_id })]
 }
