@@ -9,6 +9,7 @@ use shared_lib::frame_allocator::FrameAllocator;
 use shared_lib::serial_println;
 use crate::apic::{disable_pic, initialize_apic};
 use crate::pci::PciDevice::{Drive, Generic};
+use crate::task::timer::sleep_for;
 use crate::xsdt::read_xsdt;
 
 pub mod idt;
@@ -55,8 +56,6 @@ pub async fn init() {
                     drive.channel,
                     (drive.size * 512) / 1024,
                     core::str::from_utf8(&drive.model).expect("IDE drive model string is not utf-8"));
-
-                drive.read_from_1st_sector();
             },
             Generic(device) => {
                 log::info!("[pci] device: {:?}", device);

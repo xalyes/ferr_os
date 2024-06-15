@@ -34,7 +34,6 @@ pub enum DriveType {
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct IDEDevice {
-    reserved: bool,          // false (Empty) or true (This Drive really exists).
     pub channel: ATAChannel,
     pub drive: DriveType,        // Master or Slave
     interface_type: IDEInterfaceType,      // 0: ATA, 1:ATAPI.
@@ -85,6 +84,7 @@ enum AtaRegister {
 
 #[repr(u8)]
 #[allow(dead_code)]
+#[derive(Debug)]
 enum AtaCommand {
     ReadPio          = 0x20,
     ReadPioExt      = 0x24,
@@ -128,6 +128,8 @@ enum AtaError {
     BadSectors = 13,
     ReadsNothing = 23,
     WriteProtected = 8,
+
+    OutOfRange = 255,
 }
 
 static mut CHANNELS: [IDEChannelRegister; 2] = [IDEChannelRegister{ io_base: 0, ctrl: 0, bm_ide: 0, no_interrupt: 0 }; 2];
@@ -315,7 +317,6 @@ pub(crate) async fn ide_initialize(_prog_if: u8) -> Vec<IDEDevice> {
             model[40] = 0;
 
             drives.push(IDEDevice {
-                reserved: true,
                 channel,
                 drive,
                 interface_type,
@@ -330,9 +331,7 @@ pub(crate) async fn ide_initialize(_prog_if: u8) -> Vec<IDEDevice> {
     }
 
     for drive in &drives {
-        if drive.reserved == true {
-            log::info!("Found ATA Drive {} kB - '{}'. 48-bit addressing: {}", (drive.size * 512) / 1024, core::str::from_utf8(&drive.model).unwrap(), drive.enabled_48bit);
-        }
+        log::info!("Found ATA Drive {} kB - '{}'. 48-bit addressing: {}", (drive.size * 512) / 1024, core::str::from_utf8(&drive.model).unwrap(), drive.enabled_48bit);
     }
     drives
 }
@@ -377,6 +376,7 @@ unsafe fn ide_polling(channel: ATAChannel, advanced_check: bool) -> AtaError {
     return AtaError::NoError;
 }
 
+#[allow(dead_code)]
 enum LbaMode {
     Lba48,
     Lba28,
@@ -384,7 +384,7 @@ enum LbaMode {
 }
 
 impl IDEDevice {
-    unsafe fn read(&self, lba: u32, numsects: u8) -> Result<Vec<[u16; 256]>, AtaError> {
+    unsafe fn io_prepare(&self, lba: u32, numsects: u8, dma: bool, is_write: bool) -> LbaMode {
         CHANNELS[self.channel as usize].no_interrupt = 0x02;
         ide_write(self.channel, AtaRegister::ControlAndAltStatus, CHANNELS[self.channel as usize].no_interrupt);
 
@@ -414,12 +414,9 @@ impl IDEDevice {
             head = ((lba & 0xF000000) >> 24) as u8;
         } else {
             // CHS
-            lba_mode = LbaMode::Chs;
+            //lba_mode = LbaMode::Chs;
             unimplemented!();
         }
-
-        // DMA is not implemented for now
-        let dma = false;
 
         // wait if busy
         while (ide_read(self.channel, AtaRegister::CommandAndStatus) & AtaStatus::Busy as u8) != 0 {}
@@ -447,21 +444,61 @@ impl IDEDevice {
         let command = match lba_mode {
             LbaMode::Chs => unimplemented!(),
             LbaMode::Lba28 => {
-                if dma {
-                    AtaCommand::ReadDma
-                } else {
-                    AtaCommand::ReadPio
+                match (dma, is_write) {
+                    (false, false) => AtaCommand::ReadPio,
+                    (false, true) => AtaCommand::WritePio,
+                    (true, false) => AtaCommand::ReadDma,
+                    (true, true) => AtaCommand::WriteDma
                 }
             }
             LbaMode::Lba48 => {
-                if dma {
-                    AtaCommand::ReadDmaExt
-                } else {
-                    AtaCommand::ReadPioExt
+                match (dma, is_write) {
+                    (false, false) => AtaCommand::ReadPioExt,
+                    (false, true) => AtaCommand::WritePioExt,
+                    (true, false) => AtaCommand::ReadDmaExt,
+                    (true, true) => AtaCommand::WriteDmaExt
                 }
             }
         };
+
         ide_write(self.channel, AtaRegister::CommandAndStatus, command as u8);
+
+        lba_mode
+    }
+
+    unsafe fn write_impl(&self, lba: u32, data: Vec<[u16; 256]>) -> Result<(), AtaError> {
+        // DMA is not implemented for now
+        let dma = false;
+
+        let lba_mode = self.io_prepare(lba, data.len() as u8, dma, true);
+
+        if dma {
+            unimplemented!();
+        } else {
+            let mut port = Port::new(CHANNELS[self.channel as usize].io_base);
+
+            for sector in data {
+                ide_polling(self.channel, false);
+                for word in sector {
+                    port.write_u16(word.swap_bytes());
+                }
+            }
+
+            match lba_mode {
+                LbaMode::Lba48 => ide_write(self.channel, AtaRegister::CommandAndStatus, AtaCommand::CacheFlushExt as u8),
+                LbaMode::Chs | LbaMode::Lba28 => ide_write(self.channel, AtaRegister::CommandAndStatus, AtaCommand::CacheFlush as u8)
+            }
+            match ide_polling(self.channel, false) {
+                AtaError::NoError => Ok(()),
+                err @ _ => Err(err)
+            }
+        }
+    }
+    unsafe fn read_impl(&self, lba: u32, numsects: u8) -> Result<Vec<[u16; 256]>, AtaError> {
+        // DMA is not implemented for now
+        let dma = false;
+
+        self.io_prepare(lba, numsects, dma, false);
 
         if dma {
             unimplemented!();
@@ -490,17 +527,19 @@ impl IDEDevice {
         }
     }
 
-    pub fn read_from_1st_sector(&self) {
-        unsafe {
-            let result = self.read(0x0, 2);
-
-            let vec_read = result.expect("Failed to read from drive");
-            for (idx, sector) in vec_read.iter().enumerate() {
-                for i in 0..32 {
-                    log::info!("{:#x}: {:#06x} {:#06x} {:#06x} {:#06x} {:#06x} {:#06x} {:#06x} {:#06x}", i*8*2 + idx*0x200,
-                        sector[i*8], sector[i*8 + 1], sector[i*8 + 2], sector[i*8 + 3], sector[i*8 + 4], sector[i*8 + 5], sector[i*8 + 6], sector[i*8 + 7]);
-                }
-            }
+    pub fn write(&self, lba: u32, data: Vec<[u16; 256]>) -> Result<(), AtaError> {
+        if lba + data.len() as u32 > self.size {
+            return Err(AtaError::OutOfRange);
         }
+
+        unsafe { self.write_impl(lba, data) }
+    }
+
+    pub fn read(&self, lba: u32, num: u8) -> Result<Vec<[u16; 256]>, AtaError> {
+        if lba + num as u32 > self.size {
+            return Err(AtaError::OutOfRange);
+        }
+
+        unsafe { self.read_impl(lba, num) }
     }
 }
