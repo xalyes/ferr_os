@@ -495,7 +495,7 @@ impl IDEDevice {
             for sector in data {
                 ide_polling(self.channel, false);
                 for word in sector {
-                    port.write_u16(word.swap_bytes());
+                    port.write_u16(word);
                 }
             }
 
@@ -529,7 +529,7 @@ impl IDEDevice {
                 match err {
                     AtaError::NoError => {
                         for i in 0..256 {
-                            let word = port.read_u16().swap_bytes();
+                            let word = port.read_u16();
                             buffer[i] = word;
                         }
                         result.push(buffer.clone());

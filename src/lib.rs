@@ -58,7 +58,7 @@ pub async fn init() {
                     (drive.size() * 512) / 1024,
                     core::str::from_utf8(&drive.model()).expect("IDE drive model string is not utf-8"));
 
-                parse_gpt(drive);
+                parse_gpt(drive).expect("Failed to parse GPT");
             },
             Generic(device) => {
                 log::info!("[pci] device: {:?}", device);

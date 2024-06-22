@@ -27,7 +27,7 @@ fn main(boot_info: &'static BootInfo) -> ! {
     init_heap(l4_table, &mut allocator)
         .expect("Failed to init heap");
 
-    rust_os::init(&mut allocator, boot_info.rsdp_addr);
+    rust_os::preinit(&mut allocator, boot_info.rsdp_addr);
 
     test_main();
     loop {}
