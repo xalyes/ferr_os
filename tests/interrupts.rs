@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use lazy_static::lazy_static;
 use shared_lib::serial_print;
 use shared_lib::{exit_qemu, QemuExitCode};
-use rust_os::idt::{InterruptStackFrame, InterruptDescriptorTable };
+use ferr_os::idt::{InterruptStackFrame, InterruptDescriptorTable };
 
 lazy_static! {
     static ref TEST_IDT: InterruptDescriptorTable = {
@@ -18,7 +18,7 @@ lazy_static! {
                 .set_handler_fn(test_breakpoint_handler);
             idt.double_fault
                 .set_handler_fn(test_double_fault_handler)
-                .set_stack_index(rust_os::gdt::DOUBLE_FAULT_IST_INDEX);
+                .set_stack_index(ferr_os::gdt::DOUBLE_FAULT_IST_INDEX);
         }
 
         idt
@@ -29,7 +29,7 @@ static BREAKPOINT_CALLED: AtomicBool = AtomicBool::new(false);
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
-    rust_os::gdt::init();
+    ferr_os::gdt::init();
     init_test_idt();
 
     serial_print!("interrupts::test_breakpoint_exception...\t");
@@ -58,7 +58,7 @@ fn stack_overflow() {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    rust_os::test_panic_handler(info)
+    ferr_os::test_panic_handler(info)
 }
 
 extern "x86-interrupt" fn test_double_fault_handler(

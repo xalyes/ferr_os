@@ -10,8 +10,8 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use shared_lib::{entry_point, BootInfo, VIRT_MAPPING_OFFSET};
 use core::panic::PanicInfo;
-use rust_os::allocator::{HEAP_SIZE, init_heap};
-use rust_os::memory::active_level_4_table;
+use ferr_os::allocator::{HEAP_SIZE, init_heap};
+use ferr_os::memory::active_level_4_table;
 
 entry_point!(main);
 
@@ -27,7 +27,7 @@ fn main(boot_info: &'static BootInfo) -> ! {
     init_heap(l4_table, &mut allocator)
         .expect("Failed to init heap");
 
-    rust_os::preinit(&mut allocator, boot_info.rsdp_addr);
+    ferr_os::preinit(&mut allocator, boot_info.rsdp_addr);
 
     test_main();
     loop {}
@@ -35,7 +35,7 @@ fn main(boot_info: &'static BootInfo) -> ! {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    rust_os::test_panic_handler(info)
+    ferr_os::test_panic_handler(info)
 }
 
 #[test_case]

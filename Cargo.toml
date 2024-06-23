@@ -1,5 +1,5 @@
 [package]
-name = "rust_os"
+name = "ferr_os"
 version = "0.1.0"
 edition = "2021"
 
@@ -25,11 +25,11 @@ futures-util = { version = "0.3.30", default-features = false, features = ["allo
 chrono = { version = "0.4.38", default-features = false }
 
 [[bin]]
-name = "rust_os"
+name = "ferr_os"
 test = false
 
 [lib]
-name = "rust_os"
+name = "ferr_os"
 test = false
 
 [[test]]

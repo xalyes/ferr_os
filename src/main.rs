@@ -6,18 +6,18 @@ extern crate shared_lib;
 
 use shared_lib::{BootInfo, serial_logger, VIRT_MAPPING_OFFSET};
 use shared_lib::entry_point;
-use rust_os::memory::active_level_4_table;
+use ferr_os::memory::active_level_4_table;
 
 use core::panic::PanicInfo;
 use shared_lib::logger;
 use core::arch::asm;
 use core::sync::atomic::{ AtomicU64, Ordering };
-use rust_os::allocator::init_heap;
-use rust_os::shell::Shell;
-use rust_os::task::executor::Executor;
-use rust_os::task::{keyboard, Task, timer::{timer_loop, sleep_for}};
-use rust_os::port::Port;
-use rust_os::chrono::read_rtc;
+use ferr_os::allocator::init_heap;
+use ferr_os::shell::Shell;
+use ferr_os::task::executor::Executor;
+use ferr_os::task::{keyboard, Task, timer::{timer_loop, sleep_for}};
+use ferr_os::port::Port;
+use ferr_os::chrono::read_rtc;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -74,7 +74,7 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
 
     log::info!("Hello from kernel!");
 
-    rust_os::preinit(&mut allocator, boot_info.rsdp_addr);
+    ferr_os::preinit(&mut allocator, boot_info.rsdp_addr);
 
     log::info!("Preinit done");
 
@@ -89,7 +89,7 @@ fn kernel_main(boot_info: &'static shared_lib::BootInfo) -> ! {
 
     executor.spawn(Task::new(init_task()));
 
-    executor.spawn(Task::new(rust_os::init()));
+    executor.spawn(Task::new(ferr_os::init()));
 
     executor.run();
 
