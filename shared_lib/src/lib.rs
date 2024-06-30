@@ -20,6 +20,7 @@ pub mod frame_allocator;
 pub mod allocator;
 pub mod serial_logger;
 pub mod crc;
+mod ferr_fs;
 
 use core::arch::asm;
 use core::panic::PanicInfo;

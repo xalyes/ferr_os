@@ -38,6 +38,11 @@ fn create_fat_filesystem(fat_path: &Path, efi_file: &Path, kernel_file: &Path) {
     io::copy(&mut fs::File::open(&kernel_file).unwrap(), &mut kernel).unwrap();
 }
 
+pub const FERR_OS_ROOT: gpt::partition_types::Type = gpt::partition_types::Type {
+    guid: "01904469-E6D2-7321-A8E4-224A18FF2F0B",
+    os: gpt::partition_types::OperatingSystem::None,
+};
+
 fn create_gpt_disk(disk_path: &Path, fat_image: &Path) {
     // create new file
     let mut disk = fs::OpenOptions::new()
@@ -49,8 +54,9 @@ fn create_gpt_disk(disk_path: &Path, fat_image: &Path) {
         .unwrap();
 
     // set file size
-    let partition_size: u64 = fs::metadata(&fat_image).unwrap().len();
-    let disk_size = partition_size + 1024 * 64; // for GPT headers
+    let efi_partition_size: u64 = fs::metadata(&fat_image).unwrap().len();
+    let root_partition_size: u64 = 10 * 1024 * 1024; // 10mb
+    let disk_size = efi_partition_size + root_partition_size + 1024 * 64; // for GPT headers
     disk.set_len(disk_size).unwrap();
 
     // create a protective MBR at LBA0 so that disk is not considered
@@ -72,8 +78,13 @@ fn create_gpt_disk(disk_path: &Path, fat_image: &Path) {
 
     // add new EFI system partition and get its byte offset in the file
     let partition_id = gpt
-        .add_partition("boot", partition_size, gpt::partition_types::EFI, 0, std::option::Option::None)
+        .add_partition("boot", efi_partition_size, gpt::partition_types::EFI, 0, std::option::Option::None)
         .unwrap();
+
+    gpt
+        .add_partition("FerrOS root", root_partition_size, FERR_OS_ROOT, 0, std::option::Option::None)
+        .unwrap();
+
     let partition = gpt.partitions().get(&partition_id).unwrap();
     let start_offset = partition.bytes_start(block_size).unwrap();
 

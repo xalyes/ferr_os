@@ -174,7 +174,7 @@ pub fn parse_gpt(device: Box<dyn BlockDevice>) -> Result<(), GptError> {
             let starting_lba = partition_entry.starting_lba;
             let ending_lba = partition_entry.ending_lba;
             let attributes = partition_entry.attributes;
-            let partition_name = partition_entry.partition_name_and_tail.split_at((partition_table_header.entry_size - 0x38 + 1) as usize).0;
+            let partition_name = partition_entry.partition_name_and_tail.split_at((partition_table_header.entry_size - 0x38) as usize).0;
 
             log::info!("[gpt] entry at LBA {}:{} - type: {}, id: {} [{}-{}] {} {}", idx + partition_table_header.starting_lba_of_array as usize,
                 i, guid_to_str(partition_type_guid), guid_to_str(unique_partition_guid), starting_lba, ending_lba,
